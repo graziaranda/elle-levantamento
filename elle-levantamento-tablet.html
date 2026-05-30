@@ -1692,6 +1692,28 @@ const Storage = {
     const used = this.storageUsedKb();
     return Math.max(0, 5120 - used);
   },
+
+  // PERSISTÊNCIA DO ARMAZENAMENTO (Chrome/Android e iOS)
+  // Solicita ao navegador que não despeje o IndexedDB sob pressão de espaço.
+  // No Chrome (Android): concede por engajamento/uso — muito provável em app
+  //   instalado via "Adicionar à tela inicial". Sem essa chamada, o armazenamento
+  //   é "best-effort" e pode ser removido pelo sistema em condições extremas.
+  // No Safari (iOS): mais restritivo, mas a chamada é harmless — o user-agent
+  //   pode conceder se o site estiver nos favoritos ou instalado como PWA.
+  // Seguro chamar mesmo em browsers sem suporte: a checagem de typeof protege.
+  async requestPersistentStorage() {
+    if (typeof navigator === 'undefined') return false;
+    const sm = navigator.storage;
+    if (!sm || typeof sm.persist !== 'function') return false;
+    try {
+      const granted = await sm.persist();
+      console.info('[Elle] Armazenamento persistente:', granted ? 'concedido ✓' : 'não concedido (best-effort)');
+      return granted;
+    } catch (e) {
+      console.warn('[Elle] navigator.storage.persist() falhou:', e);
+      return false;
+    }
+  },
 };
 
 // ── Geometry helpers ──────────────────────────
@@ -2183,6 +2205,7 @@ const CanvasEditor = {
   _keyHandler:        null,
   _resizeHandler:     null,
   _visibilityHandler: null,
+  _hydratePromise:    null,   // Promise de hidratação das imagens do IndexedDB
 
   // ── Open ──────────────────────────────────
 
@@ -2215,6 +2238,12 @@ const CanvasEditor = {
       const btn = document.getElementById('btn-calib');
       if (btn) btn.style.display = '';
     }
+
+    // Iniciar hidratação das imagens do IndexedDB em background.
+    // _hydratePromise é aguardado pelo export de PDF antes de montar o relatório.
+    this._hydratePromise = Storage.hydrateAsync(this.project)
+      .then(() => this._draw())
+      .catch(err => console.warn('[Elle] hydrateAsync falhou:', err));
   },
 
   // ── Shell HTML ────────────────────────────
@@ -2344,8 +2373,11 @@ const CanvasEditor = {
       DxfWriter.download(this.project);
       Toast.show('DXF exportado', 'success');
     });
-    document.getElementById('btn-pdf').addEventListener('click', () => {
-      this._saveNow();
+    document.getElementById('btn-pdf').addEventListener('click', async () => {
+      // Aguardar hidratação — sem isso, fotos saem vazias se o PDF for gerado
+      // logo após abrir o projeto (antes do IndexedDB ter carregado as imagens).
+      if (this._hydratePromise) await this._hydratePromise;
+      await this._saveNow();
       const dataUrl = this.canvas ? this.canvas.toDataURL('image/png') : null;
       PdfReport.generate(this.project, dataUrl);
     });
@@ -5103,6 +5135,10 @@ function checkOrientation() {
 // ── Init ──────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Pede ao navegador que marque o IndexedDB como persistente.
+  // Seguro em qualquer browser: a chamada verifica suporte antes de executar.
+  Storage.requestPersistentStorage();
+
   // Portrait warning overlay (injected once)
   const warn = document.createElement('div');
   warn.id = 'portrait-warn';

@@ -665,6 +665,28 @@ const Storage = {
     const used = this.storageUsedKb();
     return Math.max(0, 5120 - used);
   },
+
+  // PERSISTÊNCIA DO ARMAZENAMENTO (Chrome/Android e iOS)
+  // Solicita ao navegador que não despeje o IndexedDB sob pressão de espaço.
+  // No Chrome (Android): concede por engajamento/uso — muito provável em app
+  //   instalado via "Adicionar à tela inicial". Sem essa chamada, o armazenamento
+  //   é "best-effort" e pode ser removido pelo sistema em condições extremas.
+  // No Safari (iOS): mais restritivo, mas a chamada é harmless — o user-agent
+  //   pode conceder se o site estiver nos favoritos ou instalado como PWA.
+  // Seguro chamar mesmo em browsers sem suporte: a checagem de typeof protege.
+  async requestPersistentStorage() {
+    if (typeof navigator === 'undefined') return false;
+    const sm = navigator.storage;
+    if (!sm || typeof sm.persist !== 'function') return false;
+    try {
+      const granted = await sm.persist();
+      console.info('[Elle] Armazenamento persistente:', granted ? 'concedido ✓' : 'não concedido (best-effort)');
+      return granted;
+    } catch (e) {
+      console.warn('[Elle] navigator.storage.persist() falhou:', e);
+      return false;
+    }
+  },
 };
 
 // ── Geometry helpers ──────────────────────────

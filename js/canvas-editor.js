@@ -58,6 +58,7 @@ const CanvasEditor = {
   _keyHandler:        null,
   _resizeHandler:     null,
   _visibilityHandler: null,
+  _hydratePromise:    null,   // Promise de hidratação das imagens do IndexedDB
 
   // ── Open ──────────────────────────────────
 
@@ -90,6 +91,12 @@ const CanvasEditor = {
       const btn = document.getElementById('btn-calib');
       if (btn) btn.style.display = '';
     }
+
+    // Iniciar hidratação das imagens do IndexedDB em background.
+    // _hydratePromise é aguardado pelo export de PDF antes de montar o relatório.
+    this._hydratePromise = Storage.hydrateAsync(this.project)
+      .then(() => this._draw())
+      .catch(err => console.warn('[Elle] hydrateAsync falhou:', err));
   },
 
   // ── Shell HTML ────────────────────────────
@@ -219,8 +226,11 @@ const CanvasEditor = {
       DxfWriter.download(this.project);
       Toast.show('DXF exportado', 'success');
     });
-    document.getElementById('btn-pdf').addEventListener('click', () => {
-      this._saveNow();
+    document.getElementById('btn-pdf').addEventListener('click', async () => {
+      // Aguardar hidratação — sem isso, fotos saem vazias se o PDF for gerado
+      // logo após abrir o projeto (antes do IndexedDB ter carregado as imagens).
+      if (this._hydratePromise) await this._hydratePromise;
+      await this._saveNow();
       const dataUrl = this.canvas ? this.canvas.toDataURL('image/png') : null;
       PdfReport.generate(this.project, dataUrl);
     });

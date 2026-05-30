@@ -124,6 +124,10 @@ function checkOrientation() {
 // ── Init ──────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Pede ao navegador que marque o IndexedDB como persistente.
+  // Seguro em qualquer browser: a chamada verifica suporte antes de executar.
+  Storage.requestPersistentStorage();
+
   // Portrait warning overlay (injected once)
   const warn = document.createElement('div');
   warn.id = 'portrait-warn';
