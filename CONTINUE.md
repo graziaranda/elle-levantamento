@@ -54,7 +54,9 @@ ficam no **localStorage do navegador do tablet** — não no código.
 
 ## Fluxo de trabalho com git
 - **Ao começar:** `git pull`
-- **Ao terminar uma tarefa:** `git add -A && git commit -m "..." && git push`
+- **REGRA (a Elle pediu isso): ao terminar CADA tarefa, faça automaticamente,
+  sem ela pedir:** `git add -A && git commit -m "<resumo claro>" && git push`.
+  Não espere ela mandar — só não suba código quebrado/pela metade.
 - Repositório: https://github.com/graziaranda/elle-levantamento (privado)
 
 ## Regras da Elle
