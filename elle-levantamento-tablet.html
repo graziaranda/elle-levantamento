@@ -2217,8 +2217,9 @@ const CanvasEditor = {
     this.zoom    = p.canvas.zoom  || 0.15;
     this.panX    = p.canvas.panX  || 200;
     this.panY    = p.canvas.panY  || 200;
-    this.history   = [];
-    this.historyIdx = -1;
+    // Snapshot inicial vazio — primeiro undo volta ao estado antes de qualquer ação
+    this.history    = [JSON.stringify(p.canvas)];
+    this.historyIdx = 0;
     this.drawStart  = null;
     this.selected   = null;
     this.envPoints  = [];
@@ -2232,6 +2233,7 @@ const CanvasEditor = {
     this._initVisibility();
     // Ferramenta inicial — DEPOIS de _initCanvas (precisa de this.canvas).
     this._setTool('wall');
+    this._updateUndoRedo();
 
     // Show calibrate button if project already has a background image
     if (this.project.canvas.backgroundImage) {
@@ -2267,8 +2269,11 @@ const CanvasEditor = {
             <span id="save-label">Salvo</span>
           </div>
           <div style="display:flex;gap:6px;margin-left:10px;">
-            <button class="btn-ghost" id="btn-undo" style="padding:6px 10px;" title="Desfazer">
+            <button class="btn-ghost" id="btn-undo" style="padding:6px 10px;" title="Desfazer (Ctrl+Z)">
               ${this._ic('undo')}
+            </button>
+            <button class="btn-ghost" id="btn-redo" style="padding:6px 10px;opacity:0.35;" title="Refazer (Ctrl+Y)" disabled>
+              ${this._ic('redo')}
             </button>
             <button class="btn-ghost" id="btn-dxf" style="padding:6px 11px; font-size:12px;">
               ${this._ic('download')} DXF
@@ -2385,6 +2390,7 @@ const CanvasEditor = {
     document.getElementById('btn-calib').addEventListener('click', () => this._startScaleCalib());
     document.getElementById('btn-close-env').addEventListener('click', () => this._closeEnvironment());
     document.getElementById('btn-undo').addEventListener('click', () => this._undo());
+    document.getElementById('btn-redo').addEventListener('click', () => this._redo());
     document.getElementById('btn-fit').addEventListener('click', () => this._fitScreen());
     document.getElementById('btn-zoom-in').addEventListener('click', () => this._zoomAtCenter(1.25));
     document.getElementById('btn-zoom-out').addEventListener('click', () => this._zoomAtCenter(1 / 1.25));
@@ -3235,6 +3241,7 @@ const CanvasEditor = {
     this.mouseWorld = this.drawStart;
     this._updateCancelBtn();
     this._updateWallActions();
+    this._updateUndoRedo();  // esconde btn-undo global durante a cadeia (C-10)
     this._showHint('Arraste na direção da parede e solte para digitar a medida');
     this._draw();
   },
@@ -3382,6 +3389,7 @@ const CanvasEditor = {
     this._aimAngle   = null;
     this._updateCancelBtn();
     this._updateWallActions();
+    this._updateUndoRedo();  // btn-undo reaparece ao sair da cadeia
     this._showHint('Toque para marcar o início da parede');
   },
 
@@ -4183,28 +4191,61 @@ const CanvasEditor = {
     this._draw();
   },
 
-  // ── Undo ─────────────────────────────────
+  // ── Undo / Redo ──────────────────────────
+  // history[0] = snapshot inicial (estado ao abrir o projeto)
+  // history[historyIdx] = estado atual
+  // history[historyIdx+1..] = estados "à frente" disponíveis para redo
 
   _pushHistory() {
     const snap = JSON.stringify(this.project.canvas);
+    // Trunca o futuro ao fazer nova ação (invalida redo pendente)
     this.history = this.history.slice(0, this.historyIdx + 1);
     this.history.push(snap);
-    if (this.history.length > 20) this.history.shift();
+    if (this.history.length > 21) this.history.shift(); // 20 ações + snapshot inicial
     this.historyIdx = this.history.length - 1;
+    this._updateUndoRedo();
   },
 
   _undo() {
-    if (this.historyIdx < 0 || this.history.length === 0) {
-      Toast.show('Nada para desfazer', 'info'); return;
-    }
-    this.historyIdx = Math.max(0, this.historyIdx - 1);
+    if (this.historyIdx <= 0) { Toast.show('Nada para desfazer', 'info'); return; }
+    this.historyIdx--;
     this.project.canvas = JSON.parse(this.history[this.historyIdx]);
-    // Desfazer encerra qualquer desenho de parede em andamento
-    this.drawStart = null; this._chainPts = null;
-    this._aiming = false; this._aimAngle = null; this._aimClosing = false;
+    this._resetWallChain();
     this._updateCancelBtn();
     this._scheduleSave();
     this._draw();
+    this._updateUndoRedo();
+  },
+
+  _redo() {
+    if (this.historyIdx >= this.history.length - 1) { Toast.show('Nada para refazer', 'info'); return; }
+    this.historyIdx++;
+    this.project.canvas = JSON.parse(this.history[this.historyIdx]);
+    this._resetWallChain();
+    this._updateCancelBtn();
+    this._scheduleSave();
+    this._draw();
+    this._updateUndoRedo();
+  },
+
+  // Atualiza estado visual dos botões undo/redo
+  _updateUndoRedo() {
+    const btnUndo = document.getElementById('btn-undo');
+    const btnRedo = document.getElementById('btn-redo');
+    const chainActive = this._chainPts && this._chainPts.length > 0;
+    if (btnUndo) {
+      // Esconder btn-undo global durante cadeia de paredes (C-10)
+      // para não conflitar com o botão flutuante "↶ Desfazer ponto"
+      const canUndo = this.historyIdx > 0;
+      btnUndo.style.display  = chainActive ? 'none' : '';
+      btnUndo.style.opacity  = canUndo ? '1' : '0.35';
+      btnUndo.disabled       = !canUndo;
+    }
+    if (btnRedo) {
+      const canRedo = this.historyIdx < this.history.length - 1;
+      btnRedo.style.opacity = canRedo ? '1' : '0.35';
+      btnRedo.disabled      = !canRedo;
+    }
   },
 
   // ── Keyboard ─────────────────────────────
@@ -4212,7 +4253,8 @@ const CanvasEditor = {
   _initKeyboard() {
     this._keyHandler = e => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); this._undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); this._undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); this._redo(); return; }
       if (e.key === 'Escape') {
         this.drawStart  = null;
         this.envPoints  = [];
@@ -4730,6 +4772,7 @@ const CanvasEditor = {
     const icons = {
       'chevron-left': `<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M8 2.5L4.5 6.5L8 10.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       'undo':   `<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 4.5h6a3.5 3.5 0 1 1 0 7H5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 2L2 4.5L4.5 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+      'redo':   `<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M11 4.5H5a3.5 3.5 0 1 0 0 7h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 2L11 4.5L8.5 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       'download':`<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5v7M4 6.5l2.5 2.5 2.5-2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M1.5 10.5h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
       'cursor': `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 2L3 12L6 8.5L9 13L10.5 12L7.5 7L12 7L3 2Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>`,
       'wall':   `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10" stroke="currentColor" stroke-width="3" stroke-linecap="square"/></svg>`,
