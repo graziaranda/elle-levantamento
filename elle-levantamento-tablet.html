@@ -2180,8 +2180,9 @@ const CanvasEditor = {
   _saveTimer:   null,
   _saveState:   'saved',
   _autoInterval: null,
-  _keyHandler:  null,
-  _resizeHandler: null,
+  _keyHandler:        null,
+  _resizeHandler:     null,
+  _visibilityHandler: null,
 
   // ── Open ──────────────────────────────────
 
@@ -2205,6 +2206,7 @@ const CanvasEditor = {
     this._initCanvas();
     this._initKeyboard();
     this._startAutoSave();
+    this._initVisibility();
     // Ferramenta inicial — DEPOIS de _initCanvas (precisa de this.canvas).
     this._setTool('wall');
 
@@ -3712,15 +3714,18 @@ const CanvasEditor = {
       input.removeEventListener('change', onchange);
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = ev => {
+      reader.onload = async ev => {
         const seq = this.project.canvas.photoPins.length + 1;
         this._pushHistory();
         this.project.canvas.photoPins.push({
           id: generateId(), x: world.x, y: world.y,
           photoData: ev.target.result, sequenceNumber: seq,
+          annotations: [], caption: '',
         });
-        this._scheduleSave();
         this._draw();
+        // Salvar imediatamente no IndexedDB — não aguarda o debounce de 2s.
+        // Se o tablet morrer logo após a captura, a foto já está persistida.
+        await this._saveNow();
         Toast.show(`Foto F${seq} adicionada`, 'success');
       };
       reader.readAsDataURL(file);
@@ -4464,18 +4469,21 @@ const CanvasEditor = {
       const reader = new FileReader();
       reader.onload = ev => {
         const img    = new Image();
-        img.onload = () => {
+        img.onload = async () => {
           this.project.canvas.backgroundImage = {
             data: ev.target.result,
             x: 0, y: 0,
             scale:   10,   // mm per image pixel (calibre depois)
             opacity: 0.3,
+            rotation: 0,
+            calibrationPoints: null,
           };
           this._bgImg = img;
-          this._scheduleSave();
           this._draw();
           const btn = document.getElementById('btn-calib');
           if (btn) btn.style.display = '';
+          // Salvar imediatamente — imagem de fundo vai pro IndexedDB agora.
+          await this._saveNow();
           Toast.show('Fundo importado — toque em "Calibrar" para ajustar a escala', 'info', 6000);
         };
         img.src = ev.target.result;
@@ -4589,6 +4597,17 @@ const CanvasEditor = {
     this._autoInterval = setInterval(() => this._saveNow(), 30000);
   },
 
+  // Salva quando o app vai para o fundo (aba/app minimizado, troca de app).
+  // Fecha a janela em que o tablet derruba o processo antes do auto-save rodar.
+  _initVisibility() {
+    this._visibilityHandler = () => {
+      if (document.visibilityState === 'hidden' && this.project) {
+        this._saveNow();  // fire-and-forget aceitável — app está indo pro fundo
+      }
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+  },
+
   _scheduleSave() {
     this._setSaveState('saving');
     clearTimeout(this._saveTimer);
@@ -4635,6 +4654,7 @@ const CanvasEditor = {
     window.removeEventListener('keydown', this._keyHandler);
     window.removeEventListener('resize', this._resizeHandler);
     window.removeEventListener('orientationchange', this._resizeHandler);
+    document.removeEventListener('visibilitychange', this._visibilityHandler);
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     clearInterval(this._autoInterval);
     clearTimeout(this._saveTimer);
