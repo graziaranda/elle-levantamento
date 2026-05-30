@@ -1023,9 +1023,11 @@ kbd {
 /* ─── data.js ─── */
 /* ═══════════════════════════════════════════
    Elle Levantamento — Data Layer & Storage
+   Schema v1 · coordenadas internas em mm
    ═══════════════════════════════════════════ */
 
-const STORAGE_KEY = 'elle_levantamento_v1';
+const SCHEMA_VERSION = 1;
+const STORAGE_KEY    = 'elle_levantamento_v1';
 
 // ── ID Generator ──────────────────────────────
 
@@ -1036,47 +1038,303 @@ function generateId() {
   });
 }
 
+// ── Utilitário de parse PT-BR ─────────────────
+// Converte "2,80" ou "2.80" para 2.8 sem NaN.
+// Usar em TODO parseFloat que lê campos de formulário.
+
+function parseLocaleFloat(str) {
+  return parseFloat(String(str ?? '').trim().replace(',', '.')) || 0;
+}
+
+function parseLocaleFloatOrNull(str) {
+  const s = String(str ?? '').trim();
+  if (s === '' || s === '-') return null;
+  const n = parseFloat(s.replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
+
+// ── INSTALLATION_LIBRARY ──────────────────────
+// Catálogo de tipos PT-BR com altura padrão de obra.
+// Nunca serializado no projeto — apenas installation.type (id) e
+// installation.height (override confirmado pelo usuário) são salvos.
+//
+// pack: null  → genérico, aparece em qualquer projeto
+// pack: 'odonto'     → ativo quando project.packs inclui 'odonto'
+// pack: 'restaurante'→ ativo quando project.packs inclui 'restaurante'
+//
+// defaultHeight: cm do piso | null = sem padrão (ex: luminária de teto)
+// symbol: código curto para DXF e planta (ex: T1, AF2)
+// layerDXF: layer no arquivo DXF
+// color: cor CSS para UI
+
+const INSTALLATION_LIBRARY = [
+
+  // ── Elétrica genérica ───────────────────────
+  { id: 'tomada_2pt',          label: 'Tomada 2P+T (NBR 14136)',       category: 'eletrica',   defaultHeight: 30,   symbol: 'T',   layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'tomada_alta',         label: 'Tomada alta / bancada',          category: 'eletrica',   defaultHeight: 105,  symbol: 'TA',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'interruptor_simples', label: 'Interruptor simples',            category: 'eletrica',   defaultHeight: 120,  symbol: 'I',   layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'interruptor_duplo',   label: 'Interruptor duplo',              category: 'eletrica',   defaultHeight: 120,  symbol: 'ID',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'interruptor_3vias',   label: 'Interruptor 3 vias (paralelo)',  category: 'eletrica',   defaultHeight: 120,  symbol: 'I3',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'luz_teto',            label: 'Luminária de teto',              category: 'eletrica',   defaultHeight: null, symbol: 'LT',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'luz_parede',          label: 'Arandela / parede',              category: 'eletrica',   defaultHeight: 200,  symbol: 'LP',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'ponto_dados',         label: 'Ponto de dados (RJ-45)',         category: 'eletrica',   defaultHeight: 30,   symbol: 'D',   layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'ponto_tv',            label: 'Ponto de TV / coaxial',          category: 'eletrica',   defaultHeight: 30,   symbol: 'TV',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'ponto_cftv',          label: 'Câmera CFTV',                    category: 'eletrica',   defaultHeight: null, symbol: 'CF',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'split_interno',       label: 'Split — unidade interna',        category: 'eletrica',   defaultHeight: 200,  symbol: 'AC',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'split_externo',       label: 'Split — unidade externa',        category: 'eletrica',   defaultHeight: null, symbol: 'ACE', layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'qd_distribuicao',     label: 'Quadro de distribuição',         category: 'eletrica',   defaultHeight: 160,  symbol: 'QD',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+  { id: 'ponto_externo',       label: 'Tomada externa / área molhada',  category: 'eletrica',   defaultHeight: 100,  symbol: 'TE',  layerDXF: 'ELETRICA',   color: '#C9A84C', pack: null },
+
+  // ── Hidráulica genérica ─────────────────────
+  { id: 'agua_fria',           label: 'Água fria',                      category: 'hidraulica', defaultHeight: 60,   symbol: 'AF',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'agua_quente',         label: 'Água quente',                    category: 'hidraulica', defaultHeight: 60,   symbol: 'AQ',  layerDXF: 'HIDRAULICA', color: '#C05050', pack: null },
+  { id: 'esgoto',              label: 'Saída de esgoto',                category: 'hidraulica', defaultHeight: 10,   symbol: 'ES',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'ralo',                label: 'Ralo / caixa sifônica',          category: 'hidraulica', defaultHeight: 0,    symbol: 'RL',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'gas_ponto',           label: 'Ponto de gás',                   category: 'hidraulica', defaultHeight: 45,   symbol: 'GS',  layerDXF: 'HIDRAULICA', color: '#FF9800', pack: null },
+  { id: 'cx_gordura',          label: 'Caixa de gordura',               category: 'hidraulica', defaultHeight: 0,    symbol: 'CG',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'cx_inspecao',         label: 'Caixa de inspeção',              category: 'hidraulica', defaultHeight: 0,    symbol: 'CI',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'registro_gaveta',     label: 'Registro de gaveta',             category: 'hidraulica', defaultHeight: 100,  symbol: 'RG',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'chuveiro_ponto',      label: 'Ponto de chuveiro',              category: 'hidraulica', defaultHeight: 220,  symbol: 'CH',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'torneira_jardim',     label: 'Torneira de jardim',             category: 'hidraulica', defaultHeight: 40,   symbol: 'TJ',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+  { id: 'maq_lavar_ponto',     label: 'Ponto máquina de lavar',         category: 'hidraulica', defaultHeight: 80,   symbol: 'ML',  layerDXF: 'HIDRAULICA', color: '#5B9BD5', pack: null },
+
+  // ── Pack: odonto ────────────────────────────
+  { id: 'ar_comprimido',       label: 'Ar comprimido (cadeira)',         category: 'odonto',     defaultHeight: 90,   symbol: 'AR',  layerDXF: 'ODONTO',     color: '#5A9A70', pack: 'odonto' },
+  { id: 'sugador',             label: 'Ponto de sugador',                category: 'odonto',     defaultHeight: 90,   symbol: 'SG',  layerDXF: 'ODONTO',     color: '#5A9A70', pack: 'odonto' },
+  { id: 'dreno_cuspe',         label: 'Dreno do cuspe',                  category: 'odonto',     defaultHeight: 10,   symbol: 'DC',  layerDXF: 'ODONTO',     color: '#5A9A70', pack: 'odonto' },
+  { id: 'gases_odonto',        label: 'Rede de gases (O₂/N₂O)',          category: 'odonto',     defaultHeight: 90,   symbol: 'GO',  layerDXF: 'ODONTO',     color: '#5A9A70', pack: 'odonto' },
+  { id: 'rx_periapical',       label: 'Ponto de RX periapical',          category: 'odonto',     defaultHeight: null, symbol: 'RX',  layerDXF: 'ODONTO',     color: '#5A9A70', pack: 'odonto' },
+  { id: 'autoclave_agua',      label: 'Água para autoclave',             category: 'odonto',     defaultHeight: 80,   symbol: 'AA',  layerDXF: 'ODONTO',     color: '#5A9A70', pack: 'odonto' },
+  { id: 'aspirador_cirurgico', label: 'Aspirador cirúrgico',             category: 'odonto',     defaultHeight: 90,   symbol: 'AS',  layerDXF: 'ODONTO',     color: '#5A9A70', pack: 'odonto' },
+
+  // ── Pack: restaurante ───────────────────────
+  { id: 'exaustao_coifa',      label: 'Exaustão / coifa',               category: 'restaurante', defaultHeight: null, symbol: 'EX',  layerDXF: 'HIDRAULICA', color: '#9C27B0', pack: 'restaurante' },
+  { id: 'gas_industrial',      label: 'Gás industrial',                 category: 'restaurante', defaultHeight: 45,   symbol: 'GI',  layerDXF: 'HIDRAULICA', color: '#FF9800', pack: 'restaurante' },
+  { id: 'tomada_trifasica',    label: 'Tomada trifásica (380V)',         category: 'restaurante', defaultHeight: 30,   symbol: 'T3F', layerDXF: 'ELETRICA',   color: '#C9A84C', pack: 'restaurante' },
+  { id: 'cx_gordura_rest',     label: 'Caixa de gordura (restaurante)', category: 'restaurante', defaultHeight: 0,    symbol: 'CGR', layerDXF: 'HIDRAULICA', color: '#9C27B0', pack: 'restaurante' },
+];
+
+// Retorna tipos disponíveis para um projeto (genéricos + packs ativos)
+function getAvailableInstallTypes(project) {
+  const packs = (project && project.packs) ? project.packs : [];
+  return INSTALLATION_LIBRARY.filter(e => e.pack === null || packs.includes(e.pack));
+}
+
+// Busca entrada da biblioteca pelo id
+function getInstallEntry(typeId) {
+  return INSTALLATION_LIBRARY.find(e => e.id === typeId) || null;
+}
+
 // ── Default canvas state ──────────────────────
 
 function defaultCanvas() {
   return {
-    zoom: 0.15,        // px per mm (0.15 ≈ 1:50 on 1366px wide display)
-    panX: 200,
-    panY: 200,
-    gridVisible: true,
-    snapEnabled: true,
-    walls: [],         // { id, x1, y1, x2, y2, thickness }
-    openings: [],      // { id, type, wallId, position, width, side }
-    installations: [], // { id, type, x, y, height, observation, sequenceNumber }
-    photoPins: [],     // { id, x, y, photoData, sequenceNumber }
-    notes: [],         // { id, x, y, text }
-    dimensions: [],    // { id, x1, y1, x2, y2, value, offset }
-    environments: [],    // { id, name, polygon, centroid, area, peDireito, observation }
-    backgroundImage: null, // { data, x, y, scale, opacity } — imagem de fundo para rastrear
+    zoom:             0.15,    // px/mm (0.15 ≈ 1:50 em 1366px)
+    panX:             200,
+    panY:             200,
+    gridVisible:      true,
+    snapEnabled:      true,
+    defaultPeDireito: null,    // m | null = herda default do projeto/não definido
+    walls:         [],         // { id, x1, y1, x2, y2, thickness, label? }
+    openings:      [],         // { id, type, wallId, position, width, height, sill, hingeSide, openDir, side }
+    installations: [],         // { id, type, x, y, height(cm), observation, sequenceNumber, wallId?, wallT? }
+    photoPins:     [],         // { id, x, y, photoData, sequenceNumber, annotations, caption }
+    notes:         [],         // { id, x, y, text, environmentId? }
+    dimensions:    [],         // { id, x1, y1, x2, y2, value, offset, wallId?, label? }
+    environments:  [],         // { id, name, polygon, peDireito, observation, color? }
+    backgroundImage: null,     // { data, x, y, scale, opacity, rotation, calibrationPoints? }
+    elevations:    [],         // { id, wallId, name, environmentId?, showDimensions, showInstallations }
+  };
+}
+
+// ── Normalizadores por entidade ───────────────
+// Cada função garante que todos os campos existem com defaults seguros.
+// Nunca remove campos desconhecidos (compatibilidade futura).
+
+function normalizeWall(w) {
+  return {
+    id:        w.id        || generateId(),
+    x1:        w.x1        || 0,
+    y1:        w.y1        || 0,
+    x2:        w.x2        || 0,
+    y2:        w.y2        || 0,
+    thickness: w.thickness || 150,
+    label:     w.label     ?? null,
+  };
+}
+
+function normalizeOpening(o) {
+  return {
+    id:        o.id        || generateId(),
+    type:      o.type      || 'door',
+    wallId:    o.wallId    || '',
+    position:  o.position  ?? 0.5,
+    width:     o.width     || 800,
+    height:    o.height    ?? null,
+    sill:      o.sill      ?? null,
+    hingeSide: o.hingeSide || 'right',
+    openDir:   o.openDir   || 'in',
+    side:      o.side      || o.hingeSide || 'right',
+  };
+}
+
+// Migração de IDs antigos (v0) para novos (v1)
+const _OLD_TYPE_MAP = {
+  tomada110:    'tomada_2pt',
+  tomada220:    'tomada_alta',
+  interruptor:  'interruptor_simples',
+  luzTeto:      'luz_teto',
+  luzParede:    'luz_parede',
+  dados:        'ponto_dados',
+  splitInterno: 'split_interno',
+  splitExterno: 'split_externo',
+  aguaFria:     'agua_fria',
+  aguaQuente:   'agua_quente',
+  ralo:         'ralo',
+  esgoto:       'esgoto',
+  gas:          'gas_ponto',
+};
+
+function normalizeInstallation(inst) {
+  const type = _OLD_TYPE_MAP[inst.type] || inst.type || 'tomada_2pt';
+  return {
+    id:             inst.id             || generateId(),
+    type,
+    x:              inst.x              || 0,
+    y:              inst.y              || 0,
+    height:         inst.height         ?? null,   // cm | null
+    observation:    inst.observation    ?? '',
+    sequenceNumber: inst.sequenceNumber ?? 1,
+    wallId:         inst.wallId         ?? null,
+    wallT:          inst.wallT          ?? null,
+  };
+}
+
+function normalizePhotoPin(p) {
+  return {
+    id:             p.id             || generateId(),
+    x:              p.x              || 0,
+    y:              p.y              || 0,
+    photoData:      p.photoData      ?? null,
+    sequenceNumber: p.sequenceNumber ?? 1,
+    annotations:    Array.isArray(p.annotations) ? p.annotations : [],
+    caption:        p.caption        ?? '',
+  };
+}
+
+function normalizeNote(n) {
+  return {
+    id:            n.id            || generateId(),
+    x:             n.x             || 0,
+    y:             n.y             || 0,
+    text:          n.text          ?? '',
+    environmentId: n.environmentId ?? null,
+  };
+}
+
+function normalizeDimension(d) {
+  return {
+    id:     d.id     || generateId(),
+    x1:     d.x1     || 0,
+    y1:     d.y1     || 0,
+    x2:     d.x2     || 0,
+    y2:     d.y2     || 0,
+    value:  d.value  ?? null,   // null = calculado de dist(x1,y1,x2,y2)
+    offset: d.offset ?? 400,   // mm
+    wallId: d.wallId ?? null,
+    label:  d.label  ?? null,
+  };
+}
+
+function normalizeEnvironment(e) {
+  // centroid e area são calculados no render — NÃO persistir
+  return {
+    id:          e.id          || generateId(),
+    name:        e.name        || 'Ambiente',
+    polygon:     Array.isArray(e.polygon) ? e.polygon : [],
+    peDireito:   e.peDireito   ?? null,   // m | null = herda defaultPeDireito
+    observation: e.observation ?? '',
+    color:       e.color       ?? null,
+  };
+}
+
+function normalizeElevation(ev) {
+  return {
+    id:                ev.id                || generateId(),
+    wallId:            ev.wallId            || '',
+    name:              ev.name              || 'Elevação',
+    environmentId:     ev.environmentId     ?? null,
+    showDimensions:    ev.showDimensions    ?? true,
+    showInstallations: ev.showInstallations ?? true,
+  };
+}
+
+function normalizeBackgroundImage(bg) {
+  if (!bg) return null;
+  return {
+    data:               bg.data               ?? null,
+    x:                  bg.x                  || 0,
+    y:                  bg.y                  || 0,
+    scale:              bg.scale              || 10,
+    opacity:            bg.opacity            ?? 0.3,
+    rotation:           bg.rotation           ?? 0,
+    calibrationPoints:  bg.calibrationPoints  ?? null,
+  };
+}
+
+function normalizeCanvas(c) {
+  if (!c || typeof c !== 'object') c = {};
+  const def = defaultCanvas();
+  return {
+    zoom:             c.zoom             ?? def.zoom,
+    panX:             c.panX             ?? def.panX,
+    panY:             c.panY             ?? def.panY,
+    gridVisible:      c.gridVisible      ?? def.gridVisible,
+    snapEnabled:      c.snapEnabled      ?? def.snapEnabled,
+    defaultPeDireito: c.defaultPeDireito ?? null,
+    walls:            (c.walls         || []).map(normalizeWall),
+    openings:         (c.openings      || []).map(normalizeOpening),
+    installations:    (c.installations || []).map(normalizeInstallation),
+    photoPins:        (c.photoPins     || []).map(normalizePhotoPin),
+    notes:            (c.notes         || []).map(normalizeNote),
+    dimensions:       (c.dimensions    || []).map(normalizeDimension),
+    environments:     (c.environments  || []).map(normalizeEnvironment),
+    backgroundImage:  normalizeBackgroundImage(c.backgroundImage),
+    elevations:       (c.elevations    || []).map(normalizeElevation),
   };
 }
 
 // ── Schema migration ──────────────────────────
-// Garante que projetos salvos com versões antigas tenham todos os campos
-// do schema atual. Sem isso, os loops de desenho (for..of) quebram quando
-// um array esperado (openings, photoPins, etc.) está ausente e o canvas
-// inteiro fica em branco.
+// Migra projetos antigos e garante que todos os campos existam.
+// Regras:
+//   1. Nunca remove campos desconhecidos (retrocompatibilidade futura)
+//   2. Migração v0→v1 (single-floor → multi-floor) ocorre na Fase 3
+//   3. Aplica-se em leitura (lazy) — Storage.get/getList — e no save
 
 function normalizeProject(p) {
   if (!p || typeof p !== 'object') return p;
-  const def = defaultCanvas();
-  p.canvas = p.canvas || {};
-  for (const key in def) {
-    if (p.canvas[key] === undefined || p.canvas[key] === null) {
-      // backgroundImage tem default null — só preenche arrays/escalares ausentes
-      if (key === 'backgroundImage') {
-        if (!('backgroundImage' in p.canvas)) p.canvas.backgroundImage = null;
-      } else {
-        p.canvas[key] = def[key];
-      }
-    }
-  }
+
+  // Garantir campos raiz
   if (!Array.isArray(p.photos)) p.photos = [];
+  if (!Array.isArray(p.packs))  p.packs  = [];
+
+  // ── Migração Fase 3 (multi-pavimento) ──────
+  // Quando p.floors existir, migrar p.canvas para floors[0].
+  // Por enquanto (Fase 1/2) o app ainda usa p.canvas diretamente.
+  // Este bloco já está aqui para quando a Fase 3 for implementada:
+  //
+  // if (p.canvas && !p.floors) {
+  //   const floorId = generateId();
+  //   p.floors = [{ id: floorId, name: 'Térreo', level: 0, canvas: p.canvas }];
+  //   p.activeFloorId = floorId;
+  //   delete p.canvas;
+  //   p.schemaVersion = SCHEMA_VERSION;
+  // }
+
+  // Normalizar canvas (Fase 1/2)
+  p.canvas = normalizeCanvas(p.canvas);
+
+  p.schemaVersion = SCHEMA_VERSION;
   return p;
 }
 
@@ -1085,15 +1343,17 @@ function normalizeProject(p) {
 function createProject(name, client, address) {
   const now = new Date().toISOString();
   return {
-    id: generateId(),
-    name: name.trim(),
-    client: client.trim(),
-    address: address.trim(),
-    createdAt: now,
-    updatedAt: now,
-    thumbnail: null,
-    canvas: defaultCanvas(),
-    photos: [],  // annotated photos (separate from photoPins)
+    id:            generateId(),
+    schemaVersion: SCHEMA_VERSION,
+    name:          name.trim(),
+    client:        client.trim(),
+    address:       address.trim(),
+    createdAt:     now,
+    updatedAt:     now,
+    thumbnail:     null,
+    packs:         [],
+    canvas:        defaultCanvas(),
+    photos:        [],
   };
 }
 
@@ -1127,8 +1387,9 @@ const Storage = {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
     } catch (e) {
-      // Storage quota exceeded — warn user
+      // localStorage quota excedida — retornar erro para quem chamou
       console.warn('Storage quota exceeded:', e);
+      return { error: 'quota', message: 'Espaço insuficiente. Exclua fotos antigas antes de continuar.' };
     }
     return project;
   },
@@ -1147,12 +1408,17 @@ const Storage = {
       return 0;
     }
   },
+
+  // Quota restante estimada em KB (heurística — localStorage máx ~5MB)
+  storageRemainingKb() {
+    const used = this.storageUsedKb();
+    return Math.max(0, 5120 - used);
+  },
 };
 
 // ── Geometry helpers ──────────────────────────
 
 function polygonArea(pts) {
-  // Shoelace formula — returns area in same units² as pts
   let area = 0;
   const n = pts.length;
   for (let i = 0; i < n; i++) {
@@ -1169,19 +1435,61 @@ function polygonCentroid(pts) {
   return { x: cx / pts.length, y: cy / pts.length };
 }
 
+// Comprimento de segmento (mm)
 function dist(x1, y1, x2, y2) {
   return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 }
 
+// Projeta ponto P no segmento AB; retorna { t: fração 0..1, d: distância ao segmento }
+function projectPointOnSegment(P, A, B) {
+  const dx = B.x - A.x, dy = B.y - A.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return { t: 0, d: dist(P.x, P.y, A.x, A.y) };
+  const t = Math.max(0, Math.min(1, ((P.x - A.x) * dx + (P.y - A.y) * dy) / lenSq));
+  const cx = A.x + t * dx, cy = A.y + t * dy;
+  return { t, d: dist(P.x, P.y, cx, cy) };
+}
+
+function pointNearSegment(P, A, B, radius) {
+  return projectPointOnSegment(P, A, B).d <= radius;
+}
+
+function pointInPolygon(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+    if (((yi > pt.y) !== (yj > pt.y)) && (pt.x < (xj - xi) * (pt.y - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+// Sanitiza string para uso em HTML (previne XSS)
 function esc(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Formata mm para exibição: ≥1000mm → "1,250m" / <1000mm → "850mm"
+function fmtMm(mm) {
+  if (mm == null) return '—';
+  return mm >= 1000
+    ? `${(mm / 1000).toFixed(3).replace('.', ',')}m`
+    : `${Math.round(mm)}mm`;
+}
+
+// Formata m² (área em mm²) para exibição
+function fmtM2(mm2) {
+  if (mm2 == null) return '—';
+  return `${(mm2 / 1e6).toFixed(2)} m²`;
 }
 
 
 /* ─── dxf-writer.js ─── */
 /* ═══════════════════════════════════════════
-   Elle Levantamento — DXF Writer (manual)
-   Gera DXF ASCII 2D compatível com AutoCAD / SketchUp
+   Elle Levantamento — DXF Writer
+   Gera DXF ASCII 2D — AutoCAD R2000 (AC1015)
    Unidades: milímetros (INSUNITS=4)
    ═══════════════════════════════════════════ */
 
@@ -1189,34 +1497,66 @@ const DxfWriter = {
 
   generate(project) {
     const c = project.canvas;
-    const L = [];  // lines buffer
+    const L = [];
 
-    this._header(L);
-    this._tables(L);
+    const bbox = this._calcBbox(c);
+
+    this._header(L, bbox);
+    this._tables(L, c);
     this._entities(L, c);
     L.push('0', 'EOF');
 
     return L.join('\r\n');
   },
 
-  // ── Header ───────────────────────────────
+  // ── Bounding box dinâmica ────────────────────
+  // Evita o bug de "planta minúscula ao abrir" causado pelo extents hardcoded.
 
-  _header(L) {
+  _calcBbox(c) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const add = (x, y) => {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    };
+    for (const w of (c.walls || []))         { add(w.x1, w.y1); add(w.x2, w.y2); }
+    for (const i of (c.installations || [])) { add(i.x, i.y); }
+    for (const n of (c.notes || []))         { add(n.x, n.y); }
+    for (const p of (c.photoPins || []))     { add(p.x, p.y); }
+    for (const e of (c.environments || []))  { for (const pt of (e.polygon || [])) add(pt.x, pt.y); }
+    if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 50000; maxY = 50000; }
+    const pad = 1000;
+    return { minX: minX - pad, minY: minY - pad, maxX: maxX + pad, maxY: maxY + pad };
+  },
+
+  // ── Header ───────────────────────────────────
+
+  _header(L, bbox) {
     L.push(
       '0', 'SECTION', '2', 'HEADER',
-      '9', '$ACADVER', '1', 'AC1015',
-      '9', '$INSUNITS', '70', '4',     // 4 = mm
-      '9', '$MEASUREMENT', '70', '1',  // metric
-      '9', '$EXTMIN', '10', '0', '20', '0', '30', '0',
-      '9', '$EXTMAX', '10', '50000', '20', '50000', '30', '0',
+      '9', '$ACADVER',    '1', 'AC1015',
+      '9', '$INSUNITS',   '70', '4',    // mm
+      '9', '$MEASUREMENT','70', '1',    // metric
+      '9', '$EXTMIN',
+        '10', bbox.minX.toFixed(1),
+        '20', (-bbox.maxY).toFixed(1),  // Y invertido
+        '30', '0',
+      '9', '$EXTMAX',
+        '10', bbox.maxX.toFixed(1),
+        '20', (-bbox.minY).toFixed(1),
+        '30', '0',
       '0', 'ENDSEC'
     );
   },
 
-  // ── Tables (layer definitions) ───────────
+  // ── Tables (layer definitions) ───────────────
+  // Layers separadas para elétrica, hidráulica, odonto, notas e fotos.
 
-  _tables(L) {
-    L.push('0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'LAYER', '70', '8');
+  _tables(L, c) {
+    // Determinar se há instalações odonto no canvas
+    const hasOdonto = (c.installations || []).some(i => {
+      const e = getInstallEntry(i.type);
+      return e && e.pack === 'odonto';
+    });
 
     const layers = [
       ['PAREDES',    7, 'CONTINUOUS'],
@@ -1224,9 +1564,15 @@ const DxfWriter = {
       ['ELETRICA',   2, 'CONTINUOUS'],
       ['HIDRAULICA', 5, 'CONTINUOUS'],
       ['COTAS',      1, 'CONTINUOUS'],
-      ['TEXTO',      6, 'CONTINUOUS'],
       ['AMBIENTES',  4, 'CONTINUOUS'],
+      ['NOTAS',      6, 'CONTINUOUS'],   // separado de FOTOS
+      ['FOTOS',      6, 'CONTINUOUS'],   // separado de NOTAS
     ];
+
+    if (hasOdonto) layers.push(['ODONTO', 3, 'CONTINUOUS']);
+
+    L.push('0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'LAYER',
+      '70', String(layers.length));
 
     for (const [name, color, ltype] of layers) {
       L.push('0', 'LAYER', '2', name, '70', '0', '62', String(color), '6', ltype);
@@ -1235,118 +1581,181 @@ const DxfWriter = {
     L.push('0', 'ENDTAB', '0', 'ENDSEC');
   },
 
-  // ── Entities ─────────────────────────────
+  // ── Entities ─────────────────────────────────
 
   _entities(L, c) {
     L.push('0', 'SECTION', '2', 'ENTITIES');
 
-    // Walls — each wall drawn as two parallel lines + caps
+    this._writeWalls(L, c);
+    this._writeOpenings(L, c);
+    this._writeDimensions(L, c);
+    this._writeEnvironments(L, c);
+    this._writeInstallations(L, c);
+    this._writeNotes(L, c);
+    this._writePhotoPins(L, c);
+
+    L.push('0', 'ENDSEC');
+  },
+
+  // ── Paredes ───────────────────────────────────
+
+  _writeWalls(L, c) {
     for (const w of (c.walls || [])) {
       const t = (w.thickness || 150) / 2;
-      const dx = w.x2 - w.x1;
-      const dy = w.y2 - w.y1;
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
       if (!len) continue;
-      const nx = -dy / len * t;
-      const ny = dx / len * t;
+      const nx = -dy / len * t, ny = dx / len * t;
 
       this._line(L, 'PAREDES', w.x1 + nx, w.y1 + ny, w.x2 + nx, w.y2 + ny);
       this._line(L, 'PAREDES', w.x1 - nx, w.y1 - ny, w.x2 - nx, w.y2 - ny);
       this._line(L, 'PAREDES', w.x1 + nx, w.y1 + ny, w.x1 - nx, w.y1 - ny);
       this._line(L, 'PAREDES', w.x2 + nx, w.y2 + ny, w.x2 - nx, w.y2 - ny);
     }
+  },
 
-    // Openings
+  // ── Aberturas (porta/janela) ─────────────────
+  // O arco de porta usa a mesma lógica geométrica do canvas-editor
+  // via _doorGeometry() para garantir consistência entre o que o
+  // usuário vê e o que sai no DXF.
+
+  _writeOpenings(L, c) {
     for (const o of (c.openings || [])) {
       const w = (c.walls || []).find(w => w.id === o.wallId);
       if (!w) continue;
-      const dx = w.x2 - w.x1;
-      const dy = w.y2 - w.y1;
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
       if (!len) continue;
-      const nx = dx / len;
-      const ny = dy / len;
+      const nx = dx / len, ny = dy / len;
       const cx = w.x1 + dx * o.position;
       const cy = w.y1 + dy * o.position;
       const half = (o.width || 900) / 2;
 
+      // Linha do vão (apaga a parede visualmente no canvas, representa o vão no DXF)
+      this._line(L, 'ABERTURAS', cx - nx * half, cy - ny * half, cx + nx * half, cy + ny * half);
+
       if (o.type === 'door') {
-        this._line(L, 'ABERTURAS', cx - nx * half, cy - ny * half, cx + nx * half, cy + ny * half);
-        // Door swing arc (approximated as 3 segments)
-        const side = o.side === 'left' ? -1 : 1;
-        const perpX = -ny * side;
-        const perpY = nx * side;
-        const hinge = { x: cx + nx * half, y: cy + ny * half };
-        this._arc(L, 'ABERTURAS', hinge.x, hinge.y, o.width, 180 + Math.atan2(ny, nx) * 180 / Math.PI, 90);
+        const geo = this._doorGeometry(cx, cy, nx, ny, o);
+        this._arc(L, 'ABERTURAS', geo.hx, geo.hy, o.width || 900, geo.startDeg, geo.sweepDeg);
       } else {
-        // Window: triple line symbol
-        const perp = { x: -ny * 40, y: nx * 40 };
-        for (const off of [-1, 0, 1]) {
+        // Janela: linha tripla
+        const perpX = -ny * 40, perpY = nx * 40;
+        for (const k of [-1, 0, 1]) {
           this._line(L, 'ABERTURAS',
-            cx - nx * half + perp.x * off, cy - ny * half + perp.y * off,
-            cx + nx * half + perp.x * off, cy + ny * half + perp.y * off
+            cx - nx * half + perpX * k, cy - ny * half + perpY * k,
+            cx + nx * half + perpX * k, cy + ny * half + perpY * k
           );
         }
       }
     }
+  },
 
-    // Dimensions
+  // Calcula geometria do arco de porta.
+  // Compartilha a lógica com canvas-editor._drawSingleOpening para garantir
+  // que o arco no DXF bate com o arco na tela.
+  _doorGeometry(cx, cy, nx, ny, o) {
+    const side = (o.hingeSide === 'left' || o.side === 'left') ? 1 : -1;
+    const half  = (o.width || 900) / 2;
+
+    // Ponto da dobradiça (extremidade da parede onde fica a dobradiça)
+    const hx = cx + nx * half * (side > 0 ? -1 : 1);
+    const hy = cy + ny * half * (side > 0 ? -1 : 1);
+
+    // Direção perpendicular (define para qual lado abre)
+    const openSide = (o.openDir === 'out') ? -side : side;
+    const perpX = -ny * openSide;
+    const perpY =  nx * openSide;
+
+    // Ângulo base em graus (no espaço DXF: Y invertido)
+    // atan2 no espaço canvas → inverte ny para DXF
+    const baseAngleDeg = Math.atan2(-perpY, perpX) * 180 / Math.PI;
+    const startDeg = baseAngleDeg;
+    const sweepDeg = 90;
+
+    return { hx, hy, startDeg, sweepDeg };
+  },
+
+  // ── Dimensões (cotas) ─────────────────────────
+  // Gera geometria visual de cota (linhas + texto).
+  // Fase futura: gerar entidade DIMENSION nativa para AutoCAD associativo.
+
+  _writeDimensions(L, c) {
     for (const d of (c.dimensions || [])) {
-      const measured = Math.round(Math.sqrt((d.x2 - d.x1) ** 2 + (d.y2 - d.y1) ** 2));
-      const val = d.value != null ? d.value : measured;
+      const measuredMm = Math.sqrt((d.x2 - d.x1) ** 2 + (d.y2 - d.y1) ** 2);
+      const val = (d.value != null) ? d.value : Math.round(measuredMm);
       this._dimension(L, d, val);
     }
+  },
 
-    // Environment names, areas and pé-direito
+  // ── Ambientes ─────────────────────────────────
+
+  _writeEnvironments(L, c) {
     for (const env of (c.environments || [])) {
-      if (env.centroid) {
-        this._text(L, 'AMBIENTES', env.centroid.x, env.centroid.y, env.name || 'Ambiente', 250);
-        if (env.area != null) {
-          const areaM2 = (env.area / 1e6).toFixed(2);
-          this._text(L, 'AMBIENTES', env.centroid.x, env.centroid.y - 350, `${areaM2}m²`, 180);
+      // Contorno do polígono
+      if (env.polygon && env.polygon.length >= 3) {
+        for (let i = 0; i < env.polygon.length; i++) {
+          const a = env.polygon[i];
+          const b = env.polygon[(i + 1) % env.polygon.length];
+          this._line(L, 'AMBIENTES', a.x, a.y, b.x, b.y);
+        }
+      }
+      // Labels no centroide (calculado aqui pois não é mais persistido)
+      if (env.polygon && env.polygon.length >= 3) {
+        const cen = polygonCentroid(env.polygon);
+        this._text(L, 'AMBIENTES', cen.x, cen.y, env.name || 'Ambiente', 250);
+
+        const area = polygonArea(env.polygon);
+        if (area > 0) {
+          const areaM2 = (area / 1e6).toFixed(2);
+          this._text(L, 'AMBIENTES', cen.x, cen.y - 350, `${areaM2}m²`, 180);
         }
         if (env.peDireito) {
-          this._text(L, 'AMBIENTES', env.centroid.x, env.centroid.y - 700, `pd=${env.peDireito}m`, 140);
-        }
-        // Draw polygon outline
-        if (env.polygon && env.polygon.length >= 3) {
-          for (let i = 0; i < env.polygon.length; i++) {
-            const a = env.polygon[i];
-            const b = env.polygon[(i + 1) % env.polygon.length];
-            this._line(L, 'AMBIENTES', a.x, a.y, b.x, b.y);
-          }
+          this._text(L, 'AMBIENTES', cen.x, cen.y - 700, `pd=${env.peDireito}m`, 140);
         }
       }
     }
+  },
 
-    // Installation points
-    const ELEC = new Set(['tomada110','tomada220','interruptor','luzTeto','luzParede','dados','splitInterno','splitExterno']);
+  // ── Instalações ───────────────────────────────
+  // Usa INSTALLATION_LIBRARY para símbolo e layer corretos.
+  // Fallback para tipos legados não mapeados.
+
+  _writeInstallations(L, c) {
+    const r = 120;
     for (const inst of (c.installations || [])) {
-      const layer = ELEC.has(inst.type) ? 'ELETRICA' : 'HIDRAULICA';
-      const r = 120;
+      const entry  = getInstallEntry(inst.type);
+      const layer  = entry ? entry.layerDXF : 'ELETRICA';
+      const symbol = entry ? entry.symbol   : inst.type.slice(0, 3).toUpperCase();
+      const code   = `${symbol}${inst.sequenceNumber}`;
+
       this._circle(L, layer, inst.x, inst.y, r);
-      const code = this._instCode(inst.type);
-      this._text(L, layer, inst.x - 80, inst.y - 80, `${code}${inst.sequenceNumber}`, 160);
-      if (inst.height) {
+      this._text(L, layer, inst.x - 80, inst.y - 80, code, 160);
+      if (inst.height != null) {
         this._text(L, layer, inst.x - 80, inst.y - 300, `h=${inst.height}cm`, 120);
       }
     }
-
-    // Notes
-    for (const note of (c.notes || [])) {
-      this._text(L, 'TEXTO', note.x, note.y, note.text, 180);
-    }
-
-    // Photo pin markers
-    for (const pin of (c.photoPins || [])) {
-      this._circle(L, 'TEXTO', pin.x, pin.y, 100);
-      this._text(L, 'TEXTO', pin.x - 60, pin.y - 60, `F${pin.sequenceNumber}`, 140);
-    }
-
-    L.push('0', 'ENDSEC');
   },
 
-  // ── Primitives ────────────────────────────
+  // ── Notas e Fotos em layers separadas ─────────
+
+  _writeNotes(L, c) {
+    for (const note of (c.notes || [])) {
+      this._text(L, 'NOTAS', note.x, note.y, note.text, 180);
+    }
+  },
+
+  _writePhotoPins(L, c) {
+    for (const pin of (c.photoPins || [])) {
+      this._circle(L, 'FOTOS', pin.x, pin.y, 100);
+      this._text(L, 'FOTOS', pin.x - 60, pin.y - 60, `F${pin.sequenceNumber}`, 140);
+      if (pin.caption) {
+        this._text(L, 'FOTOS', pin.x - 60, pin.y - 280, pin.caption, 120);
+      }
+    }
+  },
+
+  // ── Primitivas DXF ────────────────────────────
+  // Todas as coordenadas Y são invertidas (canvas Y-down → DXF Y-up).
 
   _line(L, layer, x1, y1, x2, y2) {
     L.push(
@@ -1364,6 +1773,7 @@ const DxfWriter = {
     );
   },
 
+  // startAngle e sweepAngle em graus, no espaço DXF (Y-up).
   _arc(L, layer, cx, cy, r, startAngle, sweepAngle) {
     const endAngle = startAngle + sweepAngle;
     L.push(
@@ -1384,66 +1794,48 @@ const DxfWriter = {
     );
   },
 
+  // Cota geométrica: linha + extensoras + ticks + texto.
+  // Fase futura: substituir por entidade DIMENSION nativa (AC1015 suporta).
   _dimension(L, d, valueMm) {
-    const dx = d.x2 - d.x1;
-    const dy = d.y2 - d.y1;
+    const dx = d.x2 - d.x1, dy = d.y2 - d.y1;
     const lenPx = Math.sqrt(dx * dx + dy * dy);
     if (!lenPx) return;
 
-    const nx = dx / lenPx;
-    const ny = dy / lenPx;
+    const nx = dx / lenPx, ny = dy / lenPx;
     const perp = { x: -ny, y: nx };
-    const off = d.offset || 400;
+    const off  = d.offset || 400;
 
-    // Dimension line
     const p1 = { x: d.x1 + perp.x * off, y: d.y1 + perp.y * off };
     const p2 = { x: d.x2 + perp.x * off, y: d.y2 + perp.y * off };
-    this._line(L, 'COTAS', p1.x, p1.y, p2.x, p2.y);
 
-    // Extension lines
+    this._line(L, 'COTAS', p1.x, p1.y, p2.x, p2.y);
     this._line(L, 'COTAS', d.x1, d.y1, p1.x, p1.y);
     this._line(L, 'COTAS', d.x2, d.y2, p2.x, p2.y);
 
-    // Tick marks
-    const tickSize = 80;
+    const tick = 80;
     for (const pt of [p1, p2]) {
       this._line(L, 'COTAS',
-        pt.x - perp.x * tickSize, pt.y - perp.y * tickSize,
-        pt.x + perp.x * tickSize, pt.y + perp.y * tickSize
+        pt.x - perp.x * tick, pt.y - perp.y * tick,
+        pt.x + perp.x * tick, pt.y + perp.y * tick
       );
     }
 
-    // Value label
-    const label = valueMm >= 1000
-      ? `${(valueMm / 1000).toFixed(3).replace('.', ',')}m`
-      : `${Math.round(valueMm)}mm`;
+    // Formata o valor: usa fmtMm() de data.js para consistência
+    const labelText = d.label || fmtMm(valueMm);
     const mx = (p1.x + p2.x) / 2;
     const my = (p1.y + p2.y) / 2;
-    this._text(L, 'COTAS', mx + perp.x * 100, my + perp.y * 100, label, 200);
+    this._text(L, 'COTAS', mx + perp.x * 100, my + perp.y * 100, labelText, 200);
   },
 
-  // ── Helpers ───────────────────────────────
-
-  _instCode(type) {
-    const MAP = {
-      tomada110: 'T', tomada220: 'T2', interruptor: 'I',
-      luzTeto: 'L', luzParede: 'LP', dados: 'D',
-      splitInterno: 'AR', splitExterno: 'AR-E',
-      aguaFria: 'AF', aguaQuente: 'AQ', ralo: 'RA',
-      esgoto: 'ES', gas: 'G',
-    };
-    return MAP[type] || 'X';
-  },
-
-  // ── Public export helper ─────────────────
+  // ── Export ────────────────────────────────────
 
   download(project) {
-    const dxf = this.generate(project);
+    const dxf  = this.generate(project);
     const blob = new Blob([dxf], { type: 'application/dxf' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href     = url;
-    a.download = `${project.name.replace(/[^\w\s-]/gi, '').replace(/\s+/g, '_')}_levantamento.dxf`;
+    a.download = `${project.name.replace(/[^\w\s\-]/gi, '').replace(/\s+/g, '_')}_levantamento.dxf`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -4888,60 +5280,96 @@ const PhotoAnnotator = {
 /* ─── pdf-report.js ─── */
 /* ═══════════════════════════════════════════
    Elle Levantamento — PDF Report (Módulo 5)
-   Relatório de levantamento via window.print()
-   Abre em nova aba com botão "Salvar PDF"
+   Relatório de levantamento via Blob + print()
    ═══════════════════════════════════════════ */
 
 const PdfReport = {
 
   generate(project, canvasDataUrl) {
     const c       = project.canvas;
-    const dateStr = new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const dateStr = new Date().toLocaleDateString('pt-BR', {
+      day: '2-digit', month: '2-digit', year: 'numeric'
+    });
 
-    // ── Environments table ─────────────────
+    // ── Ambientes ─────────────────────────────
     const envRows = c.environments.map(env => {
-      const areaM2    = env.area != null ? (env.area / 1e6).toFixed(2) : '—';
-      const pedireito = env.peDireito ? `${env.peDireito}m` : '—';
-      const obs       = env.observation ? `<br><span style="color:#888;font-size:11px;">${esc(env.observation)}</span>` : '';
+      // area não é mais persistida — calcular do polígono
+      const areaVal  = (env.polygon && env.polygon.length >= 3)
+        ? polygonArea(env.polygon)
+        : null;
+      const areaM2   = areaVal != null ? (areaVal / 1e6).toFixed(2) : '—';
+      const pd       = env.peDireito ? `${env.peDireito}m` : '—';
+      const obs      = env.observation
+        ? `<br><span style="color:#888;font-size:11px;">${esc(env.observation)}</span>`
+        : '';
       return `<tr>
         <td>${esc(env.name || 'Ambiente')}${obs}</td>
         <td>${areaM2} m²</td>
-        <td>${pedireito}</td>
+        <td>${pd}</td>
       </tr>`;
     }).join('');
 
-    // ── Installations table ────────────────
-    const instRows = c.installations.map(inst => {
-      const label  = this._instLabel(inst.type);
-      const code   = this._instCode(inst.type);
-      const height = inst.height ? ` &nbsp;·&nbsp; h=${inst.height}cm` : '';
-      const obs    = inst.observation ? ` &nbsp;·&nbsp; <em>${esc(inst.observation)}</em>` : '';
-      return `<tr>
-        <td><strong>${code}${inst.sequenceNumber}</strong></td>
-        <td>${esc(label)}${height}${obs}</td>
-      </tr>`;
+    // ── Instalações — agrupadas por categoria ──
+    const byCategory = {};
+    for (const inst of c.installations) {
+      const entry    = getInstallEntry(inst.type);
+      const cat      = entry ? entry.category : 'eletrica';
+      const catLabel = this._catLabel(cat);
+      if (!byCategory[catLabel]) byCategory[catLabel] = [];
+      byCategory[catLabel].push({ inst, entry });
+    }
+
+    const instSections = Object.entries(byCategory).map(([cat, items]) => {
+      const rows = items.map(({ inst, entry }) => {
+        const symbol  = entry ? entry.symbol : inst.type.slice(0, 3).toUpperCase();
+        const label   = entry ? entry.label  : inst.type;
+        const code    = `${symbol}${inst.sequenceNumber}`;
+        const height  = inst.height != null ? ` &nbsp;·&nbsp; h=${inst.height}cm` : '';
+        const obs     = inst.observation
+          ? ` &nbsp;·&nbsp; <em>${esc(inst.observation)}</em>`
+          : '';
+        return `<tr>
+          <td><strong>${code}</strong></td>
+          <td>${esc(label)}${height}${obs}</td>
+        </tr>`;
+      }).join('');
+      return `<div class="cat-group">
+        <div class="cat-title">${cat}</div>
+        <table>
+          <thead><tr><th>Código</th><th>Descrição</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
     }).join('');
 
-    // ── Notes ─────────────────────────────
-    const noteRows = c.notes.map((n, i) => `<tr><td>${i + 1}</td><td>${esc(n.text)}</td></tr>`).join('');
+    // ── Notas ─────────────────────────────────
+    const noteRows = c.notes.map((n, i) =>
+      `<tr><td>${i + 1}</td><td>${esc(n.text)}</td></tr>`
+    ).join('');
 
-    // ── Photos ─────────────────────────────
+    // ── Fotos ──────────────────────────────────
     const photosHtml = c.photoPins.filter(p => p.photoData).map(pin => {
-      const anns = (pin.annotations || []).length;
+      const anns    = (pin.annotations || []).length;
+      const caption = pin.caption ? `<div class="photo-caption">${esc(pin.caption)}</div>` : '';
+      const annBadge = anns > 0
+        ? ` &nbsp;·&nbsp; ${anns} anotaç${anns === 1 ? 'ão' : 'ões'}`
+        : '';
       return `
         <div class="photo-block">
-          <div class="photo-label">Foto F${pin.sequenceNumber}${anns > 0 ? ` &nbsp;·&nbsp; ${anns} anotaç${anns === 1 ? 'ão' : 'ões'}` : ''}</div>
-          <img src="${pin.photoData}" style="max-width:100%;max-height:320px;object-fit:contain;display:block;">
+          <div class="photo-label">F${pin.sequenceNumber}${annBadge}</div>
+          ${caption}
+          <img src="${pin.photoData}"
+               style="max-width:100%;max-height:320px;object-fit:contain;display:block;">
         </div>`;
     }).join('');
 
-    // ── Stats ──────────────────────────────
+    // ── Stats ──────────────────────────────────
     const nWalls  = c.walls.length;
     const nEnvs   = c.environments.length;
     const nInsts  = c.installations.length;
     const nPhotos = c.photoPins.filter(p => p.photoData).length;
 
-    // ── HTML ───────────────────────────────
+    // ── HTML ───────────────────────────────────
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -4950,52 +5378,63 @@ const PdfReport = {
 <title>Levantamento — ${esc(project.name)}</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; color:#222; background:#fff; font-size:13px; }
+  body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+         color:#222; background:#fff; font-size:13px; }
 
-  .print-bar { position:fixed; top:0; left:0; right:0; background:#f9f6f0; border-bottom:2px solid #C9A84C;
-    display:flex; align-items:center; gap:10px; padding:10px 20px; z-index:999; }
-  .print-bar h1 { font-size:14px; font-weight:600; flex:1; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .btn-pdf { background:#C9A84C; color:#1a1814; border:none; padding:9px 20px; border-radius:6px;
-    font-weight:700; cursor:pointer; font-size:13px; white-space:nowrap; }
-  .btn-close { background:#eee; color:#444; border:none; padding:9px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .print-bar { position:fixed; top:0; left:0; right:0; background:#f9f6f0;
+    border-bottom:2px solid #C9A84C; display:flex; align-items:center;
+    gap:10px; padding:10px 20px; z-index:999; }
+  .print-bar h1 { font-size:14px; font-weight:600; flex:1; color:#333;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .btn-pdf { background:#C9A84C; color:#1a1814; border:none;
+    padding:9px 20px; border-radius:6px; font-weight:700;
+    cursor:pointer; font-size:13px; white-space:nowrap; }
+  .btn-close { background:#eee; color:#444; border:none;
+    padding:9px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
 
   .page { max-width:860px; margin:0 auto; padding:70px 40px 60px; }
 
-  /* Cover */
-  .cover { min-height:calc(100vh - 70px); display:flex; flex-direction:column; justify-content:center;
-    padding-bottom:60px; border-bottom:3px solid #C9A84C; margin-bottom:60px; }
-  .cover-brand { font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
-    color:#C9A84C; margin-bottom:32px; }
-  .cover-title { font-size:34px; font-weight:800; color:#1a1814; line-height:1.2; margin-bottom:10px; }
+  .cover { min-height:calc(100vh - 70px); display:flex; flex-direction:column;
+    justify-content:center; padding-bottom:60px; border-bottom:3px solid #C9A84C;
+    margin-bottom:60px; }
+  .cover-brand { font-size:11px; font-weight:700; letter-spacing:0.1em;
+    text-transform:uppercase; color:#C9A84C; margin-bottom:32px; }
+  .cover-title  { font-size:34px; font-weight:800; color:#1a1814; line-height:1.2; margin-bottom:10px; }
   .cover-client { font-size:16px; color:#555; margin-bottom:4px; }
   .cover-address { font-size:13px; color:#888; margin-bottom:40px; }
-  .cover-stats { display:flex; gap:20px; flex-wrap:wrap; }
-  .stat { background:#f9f6f0; padding:14px 20px; border-radius:8px; border-left:3px solid #C9A84C; }
-  .stat-n { font-size:22px; font-weight:800; color:#1a1814; }
-  .stat-l { font-size:10px; color:#888; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; margin-top:2px; }
+  .cover-stats  { display:flex; gap:20px; flex-wrap:wrap; }
+  .stat    { background:#f9f6f0; padding:14px 20px; border-radius:8px; border-left:3px solid #C9A84C; }
+  .stat-n  { font-size:22px; font-weight:800; color:#1a1814; }
+  .stat-l  { font-size:10px; color:#888; font-weight:600;
+    text-transform:uppercase; letter-spacing:0.08em; margin-top:2px; }
   .cover-date { margin-top:40px; font-size:11px; color:#aaa; }
 
-  /* Sections */
   .section { margin-bottom:56px; page-break-inside:avoid; }
-  .section-title { font-size:16px; font-weight:700; color:#1a1814; padding-bottom:8px;
-    border-bottom:2px solid #C9A84C; margin-bottom:20px; display:flex; align-items:center; gap:10px; }
-  .section-title .badge { background:#f9f6f0; font-size:11px; padding:2px 8px; border-radius:10px; color:#888; font-weight:600; }
+  .section-title { font-size:16px; font-weight:700; color:#1a1814;
+    padding-bottom:8px; border-bottom:2px solid #C9A84C; margin-bottom:20px;
+    display:flex; align-items:center; gap:10px; }
+  .section-title .badge { background:#f9f6f0; font-size:11px;
+    padding:2px 8px; border-radius:10px; color:#888; font-weight:600; }
 
-  /* Tables */
+  .cat-group { margin-bottom:20px; }
+  .cat-title { font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.1em; color:#888; margin-bottom:8px; padding-left:2px; }
+
   table { width:100%; border-collapse:collapse; }
-  th { background:#f9f6f0; text-align:left; padding:9px 12px; font-size:11px; font-weight:700;
-    text-transform:uppercase; letter-spacing:0.08em; color:#888; }
-  td { padding:9px 12px; border-bottom:1px solid #f0ece6; font-size:12px; vertical-align:top; }
+  th { background:#f9f6f0; text-align:left; padding:9px 12px;
+    font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.08em; color:#888; }
+  td { padding:9px 12px; border-bottom:1px solid #f0ece6;
+    font-size:12px; vertical-align:top; }
   tr:last-child td { border-bottom:none; }
 
-  /* Plan image */
   .plan-img { width:100%; border:1px solid #e8e2d8; border-radius:4px; display:block; }
 
-  /* Photos */
   .photos-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:20px; }
   .photo-block { page-break-inside:avoid; }
-  .photo-label { font-size:10px; font-weight:700; color:#888; text-transform:uppercase;
-    letter-spacing:0.08em; margin-bottom:8px; }
+  .photo-label   { font-size:10px; font-weight:700; color:#888;
+    text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px; }
+  .photo-caption { font-size:11px; color:#555; margin-bottom:8px; font-style:italic; }
 
   @media print {
     .print-bar { display:none; }
@@ -5010,13 +5449,12 @@ const PdfReport = {
 
 <div class="print-bar">
   <h1>${esc(project.name)} — Levantamento Arquitetônico</h1>
-  <button class="btn-close" onclick="window.close()">✕</button>
+  <button class="btn-close" onclick="window.close()">✕ Fechar</button>
   <button class="btn-pdf" onclick="window.print()">⬇ Salvar como PDF</button>
 </div>
 
 <div class="page">
 
-  <!-- CAPA -->
   <div class="cover">
     <div class="cover-brand">Elle Levantamento Arquitetônico</div>
     <div class="cover-title">${esc(project.name)}</div>
@@ -5032,14 +5470,12 @@ const PdfReport = {
   </div>
 
   ${canvasDataUrl ? `
-  <!-- PLANTA -->
   <div class="section">
     <div class="section-title">Planta — Levantamento</div>
     <img class="plan-img" src="${canvasDataUrl}" alt="Planta levantamento">
   </div>` : ''}
 
   ${c.environments.length > 0 ? `
-  <!-- AMBIENTES -->
   <div class="section">
     <div class="section-title">Ambientes <span class="badge">${c.environments.length}</span></div>
     <table>
@@ -5049,17 +5485,12 @@ const PdfReport = {
   </div>` : ''}
 
   ${c.installations.length > 0 ? `
-  <!-- INSTALAÇÕES -->
   <div class="section">
     <div class="section-title">Instalações <span class="badge">${c.installations.length}</span></div>
-    <table>
-      <thead><tr><th>Código</th><th>Descrição</th></tr></thead>
-      <tbody>${instRows}</tbody>
-    </table>
+    ${instSections}
   </div>` : ''}
 
   ${c.notes.length > 0 ? `
-  <!-- NOTAS -->
   <div class="section">
     <div class="section-title">Notas <span class="badge">${c.notes.length}</span></div>
     <table>
@@ -5069,9 +5500,8 @@ const PdfReport = {
   </div>` : ''}
 
   ${photosHtml ? `
-  <!-- FOTOS -->
   <div class="section">
-    <div class="section-title">Fotos do Levantamento <span class="badge">${nPhotos}</span></div>
+    <div class="section-title">Fotos <span class="badge">${nPhotos}</span></div>
     <div class="photos-grid">${photosHtml}</div>
   </div>` : ''}
 
@@ -5079,30 +5509,31 @@ const PdfReport = {
 </body>
 </html>`;
 
-    const win = window.open('', '_blank');
-    if (!win) {
-      Toast.show('Permita pop-ups no navegador para gerar o PDF', 'error', 5000);
-      return;
-    }
-    win.document.write(html);
-    win.document.close();
+    // Gera via Blob + anchor (evita bloqueio de pop-up no iOS Safari/Chrome)
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href   = url;
+    a.target = '_blank';
+    a.rel    = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Revogar após delay para dar tempo do browser abrir
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
   },
 
-  // ── Helpers ───────────────────────────────
+  // ── Helpers ───────────────────────────────────
 
-  _instCode(type) {
-    const M = { tomada110:'T', tomada220:'T2', interruptor:'I', luzTeto:'L', luzParede:'LP', dados:'D',
-      splitInterno:'AR', splitExterno:'AR-E', aguaFria:'AF', aguaQuente:'AQ', ralo:'RA', esgoto:'ES', gas:'G' };
-    return M[type] || 'X';
-  },
-
-  _instLabel(type) {
-    const M = { tomada110:'Tomada 110V', tomada220:'Tomada 220V', interruptor:'Interruptor',
-      luzTeto:'Luz (teto)', luzParede:'Luz (parede)', dados:'Ponto de dados',
-      splitInterno:'Split interno', splitExterno:'Split externo',
-      aguaFria:'Água fria', aguaQuente:'Água quente',
-      ralo:'Ralo', esgoto:'Saída esgoto', gas:'Ponto de gás' };
-    return M[type] || type;
+  // Label PT-BR da categoria de instalação
+  _catLabel(category) {
+    const MAP = {
+      eletrica:    'Elétrica',
+      hidraulica:  'Hidráulica / Gás',
+      odonto:      'Odontológico',
+      restaurante: 'Restaurante',
+    };
+    return MAP[category] || category;
   },
 };
 
