@@ -2463,8 +2463,16 @@ const CanvasEditor = {
     this.project.canvas.zoom = this.zoom;
     this.project.canvas.panX = this.panX;
     this.project.canvas.panY = this.panY;
-    Storage.save(this.project);
-    this._setSaveState('saved');
+    const result = Storage.save(this.project);
+    if (result && result.error === 'quota') {
+      this._setSaveState('error');
+      Toast.show(
+        '⚠ Armazenamento cheio — exporte o projeto (DXF/PDF) e exclua fotos antigas.',
+        'error', 10000
+      );
+    } else {
+      this._setSaveState('saved');
+    }
   },
 
   _setSaveState(s) {
@@ -2472,7 +2480,16 @@ const CanvasEditor = {
     const label = document.getElementById('save-label');
     if (!dot || !label) return;
     dot.classList.toggle('saving', s === 'saving');
-    label.textContent = s === 'saving' ? 'Salvando…' : 'Salvo';
+    dot.classList.toggle('error',  s === 'error');
+    if (s === 'saving') {
+      label.textContent = 'Salvando…';
+    } else if (s === 'error') {
+      label.textContent = 'Erro ao salvar';
+      label.style.color = 'var(--red)';
+    } else {
+      label.textContent = 'Salvo';
+      label.style.color = '';
+    }
   },
 
   // ── Cleanup ───────────────────────────────
