@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Elle Levantamento</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app"></div>
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+
+  <!-- Hidden file input for photos -->
+  <input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none">
+
+  <script src="js/data.js"></script>
+  <script src="js/dxf-writer.js"></script>
+  <script src="js/canvas-editor.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/photo-annotator.js"></script>
+  <script src="js/pdf-report.js"></script>
+</body>
+</html>

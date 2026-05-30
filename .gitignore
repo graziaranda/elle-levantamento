@@ -1,0 +1,10 @@
+# Arquivos temporários / lixo
+_tmp_check.js
+_brackcheck.py
+__pycache__/
+*.pyc
+
+# Sistema operacional
+Thumbs.db
+.DS_Store
+desktop.ini
