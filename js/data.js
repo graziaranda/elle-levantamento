@@ -334,6 +334,157 @@ function createProject(name, client, address) {
   };
 }
 
+// ── ImageStore — IndexedDB para binários pesados ──────────────
+// Fotos (photoPins[].photoData) e imagem de fundo (backgroundImage.data)
+// ficam no IndexedDB (sem limite de 5 MB). O localStorage guarda apenas
+// os metadados do projeto e referências (_photoRef / _dataRef).
+//
+// Fluxo de ESCRITA (Storage.save):
+//   1. Storage._stripImages(project) → copia o projeto, remove base64,
+//      armazena refs (_photoRef / _dataRef) — operação SÍNCRONA
+//   2. O projeto "leve" vai pro localStorage normalmente
+//   3. ImageStore.extractAndSave(project) salva as imagens no IndexedDB
+//      em background (fire-and-forget) — o caller NÃO espera
+//
+// Fluxo de LEITURA (Storage.get + hydrateAsync):
+//   1. Storage.get(id) → carrega do localStorage, devolve projeto com
+//      photoData = null (mas _photoRef preenchido) — SÍNCRONO
+//   2. Storage.hydrateAsync(project) → preenche photoData de volta do
+//      IndexedDB — ASSÍNCRONO, chamado pelo canvas-editor após open()
+//
+// Compatibilidade retroativa:
+//   Projetos antigos têm photoData como string base64 diretamente no
+//   localStorage. Na próxima save() eles são migrados para IndexedDB
+//   automaticamente. Até lá, o get() os devolve com photoData preenchido.
+
+const ImageStore = {
+  _DB_NAME:    'elle_levantamento_images',
+  _DB_VERSION: 1,
+  _STORE:      'images',
+  _db:         null,
+
+  _open() {
+    if (this._db) return Promise.resolve(this._db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(this._DB_NAME, this._DB_VERSION);
+      req.onupgradeneeded = e => {
+        e.target.result.createObjectStore(this._STORE, { keyPath: 'id' });
+      };
+      req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
+      req.onerror   = e => reject(e.target.error);
+    });
+  },
+
+  async put(id, dataUrl) {
+    const db = await this._open();
+    return new Promise((resolve, reject) => {
+      const tx  = db.transaction(this._STORE, 'readwrite');
+      tx.objectStore(this._STORE).put({ id, dataUrl });
+      tx.oncomplete = resolve;
+      tx.onerror    = e => reject(e.target.error);
+    });
+  },
+
+  async get(id) {
+    if (!id) return null;
+    try {
+      const db = await this._open();
+      return new Promise((resolve, reject) => {
+        const req = db.transaction(this._STORE, 'readonly')
+                      .objectStore(this._STORE).get(id);
+        req.onsuccess = e => resolve(e.target.result ? e.target.result.dataUrl : null);
+        req.onerror   = e => reject(e.target.error);
+      });
+    } catch {
+      return null;
+    }
+  },
+
+  async del(id) {
+    if (!id) return;
+    try {
+      const db = await this._open();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(this._STORE, 'readwrite');
+        tx.objectStore(this._STORE).delete(id);
+        tx.oncomplete = resolve;
+        tx.onerror    = e => reject(e.target.error);
+      });
+    } catch { /* ignore */ }
+  },
+
+  // Recebe o projeto EM MEMÓRIA (com base64 intacto).
+  // Salva cada imagem no IndexedDB e retorna um mapa de refs.
+  async extractAndSave(project) {
+    const saves = [];
+    const c = project.canvas;
+    if (!c) return;
+
+    for (const pin of (c.photoPins || [])) {
+      if (pin.photoData && typeof pin.photoData === 'string' && pin.photoData.startsWith('data:')) {
+        const ref = `img_${pin.id}`;
+        saves.push(this.put(ref, pin.photoData));
+      }
+    }
+
+    const bg = c.backgroundImage;
+    if (bg && bg.data && typeof bg.data === 'string' && bg.data.startsWith('data:')) {
+      const ref = `bg_${project.id}`;
+      saves.push(this.put(ref, bg.data));
+    }
+
+    if (saves.length) await Promise.all(saves);
+  },
+
+  // Recarrega as imagens de volta no projeto (vindo do localStorage).
+  // Chame após Storage.get() quando precisar exibir fotos.
+  async loadImages(project) {
+    const c = project.canvas;
+    if (!c) return project;
+    const loads = [];
+
+    for (const pin of (c.photoPins || [])) {
+      if (!pin.photoData && pin._photoRef) {
+        loads.push(this.get(pin._photoRef).then(d => { pin.photoData = d; }));
+      }
+    }
+
+    const bg = c.backgroundImage;
+    if (bg && !bg.data && bg._dataRef) {
+      loads.push(this.get(bg._dataRef).then(d => { bg.data = d; }));
+    }
+
+    if (loads.length) await Promise.all(loads);
+    return project;
+  },
+
+  // Remove imagens do IndexedDB que não são mais referenciadas por nenhum projeto.
+  async gc() {
+    try {
+      const all      = Storage.getAll();
+      const usedRefs = new Set();
+      for (const p of Object.values(all)) {
+        for (const pin of (p.canvas?.photoPins || [])) {
+          if (pin._photoRef) usedRefs.add(pin._photoRef);
+        }
+        const bgRef = p.canvas?.backgroundImage?._dataRef;
+        if (bgRef) usedRefs.add(bgRef);
+      }
+      const db = await this._open();
+      const keys = await new Promise((res, rej) => {
+        const req = db.transaction(this._STORE, 'readonly').objectStore(this._STORE).getAllKeys();
+        req.onsuccess = e => res(e.target.result);
+        req.onerror   = e => rej(e.target.error);
+      });
+      const orphans = keys.filter(k => !usedRefs.has(k));
+      await Promise.all(orphans.map(k => this.del(k)));
+      return orphans.length;
+    } catch {
+      return 0;
+    }
+  },
+};
+
 // ── Storage API ───────────────────────────────
 
 const Storage = {
@@ -357,18 +508,60 @@ const Storage = {
     return p ? normalizeProject(p) : null;
   },
 
+  // Recarrega imagens pesadas do IndexedDB para o projeto (assíncrono).
+  // Chamar após get() quando o canvas precisar exibir fotos.
+  // Retorna Promise<project> com photoData e backgroundImage.data preenchidos.
+  hydrateAsync(project) {
+    return ImageStore.loadImages(project);
+  },
+
+  // Copia o projeto sem os binários pesados (base64).
+  // Adiciona refs (_photoRef / _dataRef) para o IndexedDB.
+  // Operação SÍNCRONA — não depende de I/O.
+  _stripImages(project) {
+    const p = JSON.parse(JSON.stringify(project));
+    const c = p.canvas;
+    if (!c) return p;
+
+    for (const pin of (c.photoPins || [])) {
+      if (pin.photoData && typeof pin.photoData === 'string' && pin.photoData.startsWith('data:')) {
+        pin._photoRef = `img_${pin.id}`;
+        pin.photoData = null;
+      }
+      // Retrocompat: se já estava em base64 curta (<200 chars = ícone SVG ou similar), mantém
+    }
+
+    const bg = c.backgroundImage;
+    if (bg && bg.data && typeof bg.data === 'string' && bg.data.startsWith('data:')) {
+      bg._dataRef = `bg_${project.id}`;
+      bg.data     = null;
+    }
+
+    return p;
+  },
+
   save(project) {
     const all = this.getAll();
     project.updatedAt = new Date().toISOString();
-    all[project.id] = project;
+
+    // 1. Strip: retira base64 pesados e coloca refs
+    const liteProject = this._stripImages(project);
+    liteProject.updatedAt = project.updatedAt;
+
+    all[liteProject.id] = liteProject;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
     } catch (e) {
-      // localStorage quota excedida — retornar erro para quem chamou
       console.warn('Storage quota exceeded:', e);
       return { error: 'quota', message: 'Espaço insuficiente. Exclua fotos antigas antes de continuar.' };
     }
-    return project;
+
+    // 2. Salvar imagens no IndexedDB em background (fire-and-forget)
+    ImageStore.extractAndSave(project).catch(err =>
+      console.warn('ImageStore.extractAndSave falhou:', err)
+    );
+
+    return project;  // devolve o projeto ORIGINAL (com base64 em memória)
   },
 
   delete(id) {
