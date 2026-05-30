@@ -1776,18 +1776,61 @@ const CanvasEditor = {
 
     document.querySelectorAll('.install-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const type = btn.dataset.type;
-        Modal.close();
-        // createInstallation() copia o defaultHeight da biblioteca para a instância
-        const inst = createInstallation(type, world.x, world.y, this.project.canvas);
-        this._pushHistory();
-        this.project.canvas.installations.push(inst);
-        this._scheduleSave();
-        this._draw();
+        const type  = btn.dataset.type;
         const entry = getInstallEntry(type);
         const label = entry ? entry.label : type;
-        const hMsg  = inst.height != null ? ` · h=${inst.height}cm` : '';
-        Toast.show(`${label}${hMsg} inserido`, 'success', 2500);
+
+        // C-05 step 2: mostrar mini-form de altura após escolha do tipo
+        // A altura padrão da biblioteca já está sugerida — 1 toque para confirmar.
+        const defaultH = entry ? entry.defaultHeight : null;
+        const hDisplay = defaultH != null ? String(defaultH) : '';
+
+        Modal.open(`
+          <div class="modal-header">
+            <h2 class="modal-title" style="font-size:14px;">${esc(label)}</h2>
+            <button class="modal-close" id="mc2">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <div class="form-group">
+              <label class="form-label">Altura do piso <span style="color:var(--text-faint)">(cm)</span></label>
+              <input class="form-input" id="inst-height" inputmode="decimal" type="text"
+                value="${hDisplay}" placeholder="${defaultH != null ? defaultH : '—'}"
+                style="-webkit-user-select:text;user-select:text;font-size:20px;padding:14px;text-align:center;">
+            </div>
+          </div>
+          <div class="modal-footer" style="gap:8px;">
+            <button class="btn-ghost" id="inst-skip" style="font-size:11px;">Inserir sem altura</button>
+            <button class="btn-primary" id="inst-ok" style="flex:1;">Inserir</button>
+          </div>
+        `);
+        setTimeout(() => document.getElementById('inst-height')?.select(), 60);
+
+        const doInsert = (height) => {
+          Modal.close();
+          const inst = createInstallation(type, world.x, world.y, this.project.canvas);
+          inst.height = height;
+          this._pushHistory();
+          this.project.canvas.installations.push(inst);
+          this._scheduleSave();
+          this._draw();
+          const hMsg = inst.height != null ? ` · h=${inst.height}cm` : '';
+          Toast.show(`${label}${hMsg} inserido`, 'success', 2500);
+        };
+
+        document.getElementById('mc2').addEventListener('click', () => Modal.close());
+        document.getElementById('inst-skip').addEventListener('click', () => doInsert(null));
+        document.getElementById('inst-ok').addEventListener('click', () => {
+          const v = parseLocaleFloatOrNull(document.getElementById('inst-height')?.value);
+          doInsert(v !== null ? Math.round(v) : defaultH);
+        });
+        // Enter confirma
+        document.getElementById('inst-height')?.addEventListener('keydown', e => {
+          if (e.key === 'Enter') document.getElementById('inst-ok')?.click();
+        });
       });
     });
   },
@@ -1991,11 +2034,18 @@ const CanvasEditor = {
     }
 
     if (type === 'install') {
+      // getInstallEntry safety — nunca null quando o código usa .color, .label, etc.
+      const instEntry  = getInstallEntry(elem.type) || { label: elem.type, defaultHeight: null, color: '#C9A84C' };
+      // Backfill: se height é null, mostrar default da biblioteca como placeholder
+      const hVal       = elem.height != null ? String(elem.height) : '';
+      const hPlaceholder = instEntry.defaultHeight != null ? `padrão: ${instEntry.defaultHeight}` : 'não definida';
+
       panel.innerHTML = `
-        <div class="sidebar-section-title">${this._instLabel(elem.type)}</div>
+        <div class="sidebar-section-title">${esc(instEntry.label)}</div>
         <div class="prop-row">
           <div class="prop-label">Altura do piso (cm)</div>
-          <input class="prop-input" id="prop-height" type="number" value="${elem.height || ''}" placeholder="Ex: 40">
+          <input class="prop-input" id="prop-height" inputmode="decimal" type="text"
+            value="${esc(hVal)}" placeholder="${esc(hPlaceholder)}">
         </div>
         <div class="prop-row">
           <div class="prop-label">Observação</div>
