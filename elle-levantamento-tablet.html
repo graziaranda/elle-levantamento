@@ -3984,23 +3984,55 @@ const CanvasEditor = {
 
     if (type === 'wall') {
       const len = Math.round(dist(elem.x1, elem.y1, elem.x2, elem.y2));
+      const cm  = mm => Math.round(mm / 10);
       panel.innerHTML = `
         <div class="sidebar-section-title">Parede</div>
         <div class="prop-row">
           <div class="prop-label">Comprimento</div>
-          <input class="prop-input" id="prop-len" type="text" value="${len >= 1000 ? (len / 1000).toFixed(3) : len}" readonly>
+          <input class="prop-input" id="prop-len" type="text" value="${len >= 1000 ? (len / 1000).toFixed(3) : len}" readonly
+            style="opacity:0.55;cursor:default;" title="Comprimento calculado automaticamente">
         </div>
         <div class="prop-row">
           <div class="prop-label">Espessura (mm)</div>
           <input class="prop-input" id="prop-thick" type="number" value="${elem.thickness || 150}" min="50" max="600">
         </div>
+        <details style="margin-top:10px;">
+          <summary style="font-size:10px;color:var(--text-faint);cursor:pointer;letter-spacing:.07em;text-transform:uppercase;">
+            Posição avançada
+          </summary>
+          <div class="prop-row" style="margin-top:8px;">
+            <div class="prop-label">Início X (cm)</div>
+            <input class="prop-input" id="prop-x1" type="number" value="${cm(elem.x1)}">
+          </div>
+          <div class="prop-row">
+            <div class="prop-label">Início Y (cm)</div>
+            <input class="prop-input" id="prop-y1" type="number" value="${cm(elem.y1)}">
+          </div>
+          <div class="prop-row">
+            <div class="prop-label">Fim X (cm)</div>
+            <input class="prop-input" id="prop-x2" type="number" value="${cm(elem.x2)}">
+          </div>
+          <div class="prop-row">
+            <div class="prop-label">Fim Y (cm)</div>
+            <input class="prop-input" id="prop-y2" type="number" value="${cm(elem.y2)}">
+          </div>
+        </details>
         <div style="margin-top:8px;">
           <button class="btn-danger-solid" id="prop-delete" style="width:100%; font-size:11px; padding:7px;">Excluir parede</button>
         </div>
       `;
+      const findW = () => this.project.canvas.walls.find(w => w.id === elem.id);
       document.getElementById('prop-thick').addEventListener('change', e => {
-        const w = this.project.canvas.walls.find(w => w.id === elem.id);
+        const w = findW();
         if (w) { w.thickness = parseInt(e.target.value) || 150; this._scheduleSave(); this._draw(); }
+      });
+      // C-13: campos de posição — editáveis para correção de coordenadas (cm → mm)
+      ['x1','y1','x2','y2'].forEach(k => {
+        const el = document.getElementById('prop-' + k);
+        if (el) el.addEventListener('change', e => {
+          const w = findW();
+          if (w) { const v = parseLocaleFloat(e.target.value); w[k] = Math.round(v * 10); this._scheduleSave(); this._draw(); }
+        });
       });
       document.getElementById('prop-delete').addEventListener('click', () => this._deleteSelected());
     }
@@ -4008,11 +4040,26 @@ const CanvasEditor = {
     if (type === 'opening') {
       const isDoor = elem.type === 'door';
       const cm = mm => (mm != null ? Math.round(mm / 10) : '');
+      // Calcular distância do canto para exibição (C-04)
+      const wall = this.project.canvas.walls.find(w => w.id === elem.wallId);
+      const wallLen = wall ? dist(wall.x1, wall.y1, wall.x2, wall.y2) : 0;
+      const halfW   = (elem.width || 0) / 2;
+      const distFromStart = Math.max(0, Math.round((elem.position * wallLen - halfW) / 10));
+      const distFromEnd   = Math.max(0, Math.round((wallLen - elem.position * wallLen - halfW) / 10));
+      const showFromEnd = elem.side === 'right' || elem.side === 'left';
+      // Mostra distância do canto mais próximo
+      const distCm = Math.min(distFromStart, distFromEnd);
+      const isFromEnd = distFromEnd < distFromStart;
+
       panel.innerHTML = `
         <div class="sidebar-section-title">${isDoor ? 'Porta' : 'Janela'}</div>
         <div class="prop-row">
           <div class="prop-label">Largura (cm)</div>
           <input class="prop-input" id="prop-opw" type="number" value="${cm(elem.width)}">
+        </div>
+        <div class="prop-row">
+          <div class="prop-label" title="Distância do canto mais próximo até a borda do vão">Dist. do canto (cm)</div>
+          <input class="prop-input" id="prop-opdist" type="number" value="${distCm}" min="0">
         </div>
         <div class="prop-row">
           <div class="prop-label">Altura (cm)</div>
@@ -4053,6 +4100,29 @@ const CanvasEditor = {
       bindNum('prop-opw', 'width');
       bindNum('prop-oph', 'height');
       if (!isDoor) bindNum('prop-ops', 'sill');
+      // Listener para distância do canto — C-04
+      const distEl = document.getElementById('prop-opdist');
+      if (distEl && wall) {
+        distEl.addEventListener('change', e => {
+          const o = findO();
+          if (!o) return;
+          const w2 = this.project.canvas.walls.find(w => w.id === o.wallId);
+          if (!w2) return;
+          const wl  = dist(w2.x1, w2.y1, w2.x2, w2.y2);
+          const hw  = (o.width || 0) / 2;
+          const dMm = parseLocaleFloat(e.target.value) * 10;
+          // Calcular nova posição: distância do canto mais próximo
+          let pos;
+          if (isFromEnd) {
+            pos = (wl - dMm - hw) / wl;
+          } else {
+            pos = (dMm + hw) / wl;
+          }
+          o.position = Math.max(hw / wl, Math.min(1 - hw / wl, pos));
+          this._scheduleSave();
+          this._draw();
+        });
+      }
       panel.querySelectorAll('.op-seg').forEach(segEl =>
         segEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
           segEl.querySelectorAll('button').forEach(x => x.classList.remove('active'));
