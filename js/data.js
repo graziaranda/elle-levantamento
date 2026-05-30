@@ -16,17 +16,43 @@ function generateId() {
 }
 
 // ── Utilitário de parse PT-BR ─────────────────
-// Converte "2,80" ou "2.80" para 2.8 sem NaN.
-// Usar em TODO parseFloat que lê campos de formulário.
+// Suporta todos os formatos que chegam de teclado em campo:
+//   "1,5"       → 1.5   (vírgula decimal BR)
+//   "1.5"       → 1.5   (ponto decimal EN, hábito de teclado)
+//   "1.234,56"  → 1234.56 (milhar BR + decimal)
+//   "1.234.567" → 1234567 (milhar BR sem decimal)
+//   "1.234"     → 1.234  (ambíguo: trata como decimal EN — safer)
+//
+// Algoritmo:
+//   • Tem vírgula E ponto   → formato BR completo: remove pontos, troca vírgula
+//   • Tem apenas vírgula    → decimal BR: troca vírgula por ponto
+//   • Tem apenas ponto      → decimal EN ou inteiro: usa como está
+//   • Nenhum               → inteiro: usa como está
+
+function _parseLocaleStr(str) {
+  let s = String(str ?? '').trim();
+  const hasComma  = s.includes(',');
+  const hasPeriod = s.includes('.');
+  if (hasComma && hasPeriod) {
+    // "1.234,56" ou "1.234.567,8" → remove pontos de milhar, troca vírgula
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (hasComma) {
+    // "1,5" → "1.5"
+    s = s.replace(',', '.');
+  }
+  // caso só período ou nenhum: usar como está
+  return s;
+}
 
 function parseLocaleFloat(str) {
-  return parseFloat(String(str ?? '').trim().replace(',', '.')) || 0;
+  const n = parseFloat(_parseLocaleStr(str));
+  return isNaN(n) ? 0 : n;
 }
 
 function parseLocaleFloatOrNull(str) {
   const s = String(str ?? '').trim();
-  if (s === '' || s === '-') return null;
-  const n = parseFloat(s.replace(',', '.'));
+  if (!s || s === '-') return null;
+  const n = parseFloat(_parseLocaleStr(s));
   return isNaN(n) ? null : n;
 }
 
@@ -202,14 +228,32 @@ const _OLD_TYPE_MAP = {
   gas:          'gas_ponto',
 };
 
+// Retorna true se o tipo existe na INSTALLATION_LIBRARY.
+// Usado para distinguir tipos conhecidos de tipos desconhecidos/customizados.
+function isKnownInstallType(type) {
+  return INSTALLATION_LIBRARY.some(e => e.id === type);
+}
+
 function normalizeInstallation(inst) {
-  const type = _OLD_TYPE_MAP[inst.type] || inst.type || 'tomada_2pt';
+  // 1. Tentar migrar tipo antigo
+  let type = _OLD_TYPE_MAP[inst.type] || inst.type;
+
+  // 2. Tipo null/undefined/vazio → fallback genérico
+  if (!type) type = 'tomada_2pt';
+
+  // 3. Tipo desconhecido (não está no mapa antigo nem na biblioteca):
+  //    PRESERVAR o tipo original — a instalação não desaparece.
+  //    Renderiza com código fallback (primeiras 3 letras em maiúsculas).
+  //    Razão: pode ser um tipo customizado de outro dispositivo, ou um tipo
+  //    que será adicionado à biblioteca no futuro. Silenciosamente mudar para
+  //    'tomada_2pt' seria pior (perderia a intenção do levantamento).
+
   return {
     id:             inst.id             || generateId(),
     type,
     x:              inst.x              || 0,
     y:              inst.y              || 0,
-    height:         inst.height         ?? null,   // cm | null
+    height:         inst.height         ?? null,
     observation:    inst.observation    ?? '',
     sequenceNumber: inst.sequenceNumber ?? 1,
     wallId:         inst.wallId         ?? null,

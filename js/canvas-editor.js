@@ -749,8 +749,9 @@ const CanvasEditor = {
     const r = 180;
     for (const inst of this.project.canvas.installations) {
       const sel   = this.selected?.id === inst.id;
-      const color = inst.type.startsWith('agua') || inst.type === 'ralo' || inst.type === 'esgoto' || inst.type === 'gas'
-        ? '#5B9BD5' : '#C9A84C';
+      // Cor vem da INSTALLATION_LIBRARY — não de checagens hardcoded de tipo
+      const entry = getInstallEntry(inst.type);
+      const color = entry ? entry.color : '#C9A84C';
 
       ctx.strokeStyle = sel ? '#F5F0E8' : color;
       ctx.fillStyle   = 'rgba(26,24,20,0.85)';
@@ -769,10 +770,10 @@ const CanvasEditor = {
       ctx.textBaseline= 'middle';
       ctx.fillText(`${code}${inst.sequenceNumber}`, inst.x, inst.y);
 
-      if (inst.height) {
+      if (inst.height != null) {
         ctx.font = `400 ${fs * 0.8}px Inter,sans-serif`;
         ctx.fillStyle = 'rgba(168,152,128,0.7)';
-        ctx.fillText(`h${inst.height}`, inst.x, inst.y + r + 14 / this.zoom);
+        ctx.fillText(`h=${inst.height}cm`, inst.x, inst.y + r + 14 / this.zoom);
       }
       ctx.textBaseline = 'alphabetic';
     }
