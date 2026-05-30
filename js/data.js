@@ -124,6 +124,36 @@ function defaultCanvas() {
   };
 }
 
+// ── Factories de entidades ────────────────────
+// Criam objetos novos com todos os defaults corretos.
+// Canvas-editor chama estas funções — nunca monta o objeto inline.
+
+// Cria uma nova instalação com height pré-preenchido da INSTALLATION_LIBRARY.
+// height é COPIADO para a instância (não referência ao tipo) — cada ponto
+// é independentemente editável em campo ("aquela tomada está a 110cm, não 30cm").
+function createInstallation(type, x, y, canvas) {
+  const entry   = getInstallEntry(type);
+  const symbol  = entry ? entry.symbol : type.slice(0, 3).toUpperCase();
+
+  // sequenceNumber: próximo número para este símbolo no canvas atual
+  const existing = (canvas.installations || []).filter(i => {
+    const e = getInstallEntry(i.type);
+    return (e ? e.symbol : i.type.slice(0, 3).toUpperCase()) === symbol;
+  });
+
+  return {
+    id:             generateId(),
+    type,
+    x,
+    y,
+    height:         entry ? entry.defaultHeight : null, // CÓPIA do default — editável por instância
+    observation:    '',
+    sequenceNumber: existing.length + 1,
+    wallId:         null,
+    wallT:          null,
+  };
+}
+
 // ── Normalizadores por entidade ───────────────
 // Cada função garante que todos os campos existem com defaults seguros.
 // Nunca remove campos desconhecidos (compatibilidade futura).
