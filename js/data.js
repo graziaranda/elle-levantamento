@@ -413,12 +413,13 @@ function createProject(name, client, address) {
 // ficam no IndexedDB (sem limite de 5 MB). O localStorage guarda apenas
 // os metadados do projeto e referências (_photoRef / _dataRef).
 //
-// Fluxo de ESCRITA (Storage.save):
-//   1. Storage._stripImages(project) → copia o projeto, remove base64,
-//      armazena refs (_photoRef / _dataRef) — operação SÍNCRONA
-//   2. O projeto "leve" vai pro localStorage normalmente
-//   3. ImageStore.extractAndSave(project) salva as imagens no IndexedDB
-//      em background (fire-and-forget) — o caller NÃO espera
+// Fluxo de ESCRITA (Storage.save — async):
+//   1. ImageStore.extractAndSave(project) → persiste imagens no IndexedDB
+//      e AGUARDA confirmação (await) antes de qualquer outra coisa.
+//   2. Só após confirmação: _stripImages(project) → clona sem base64.
+//   3. O projeto "leve" vai pro localStorage.
+//   Fallback: se IndexedDB falhar, o base64 permanece inline no localStorage
+//   naquele save (projeto pesado, mas sem perda de dados).
 //
 // Fluxo de LEITURA (Storage.get + hydrateAsync):
 //   1. Storage.get(id) → carrega do localStorage, devolve projeto com
@@ -614,14 +615,25 @@ const Storage = {
     return p;
   },
 
-  save(project) {
-    const all = this.getAll();
+  async save(project) {
     project.updatedAt = new Date().toISOString();
 
-    // 1. Strip: retira base64 pesados e coloca refs
-    const liteProject = this._stripImages(project);
+    // 1. Persistir imagens no IndexedDB PRIMEIRO e AGUARDAR confirmação.
+    //    Só removemos o base64 do localStorage depois que o IndexedDB confirmar.
+    //    Se o IndexedDB falhar, o base64 permanece inline (fallback seguro —
+    //    o projeto fica pesado, mas nenhuma foto é perdida em silêncio).
+    let liteProject;
+    try {
+      await ImageStore.extractAndSave(project);
+      liteProject = this._stripImages(project);   // clona sem base64
+    } catch (idbErr) {
+      console.warn('ImageStore: gravação no IndexedDB falhou, mantendo base64 inline:', idbErr);
+      liteProject = JSON.parse(JSON.stringify(project)); // clone completo, com base64
+    }
     liteProject.updatedAt = project.updatedAt;
 
+    // 2. Salvar projeto no localStorage (leve se IndexedDB ok; pesado se fallback)
+    const all = this.getAll();
     all[liteProject.id] = liteProject;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
@@ -629,11 +641,6 @@ const Storage = {
       console.warn('Storage quota exceeded:', e);
       return { error: 'quota', message: 'Espaço insuficiente. Exclua fotos antigas antes de continuar.' };
     }
-
-    // 2. Salvar imagens no IndexedDB em background (fire-and-forget)
-    ImageStore.extractAndSave(project).catch(err =>
-      console.warn('ImageStore.extractAndSave falhou:', err)
-    );
 
     return project;  // devolve o projeto ORIGINAL (com base64 em memória)
   },

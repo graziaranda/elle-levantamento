@@ -207,8 +207,10 @@ const CanvasEditor = {
       </div>
     `;
 
-    document.getElementById('btn-back').addEventListener('click', () => {
-      this._saveNow(); this.destroy(); App.navigate('/');
+    document.getElementById('btn-back').addEventListener('click', async () => {
+      await this._saveNow();   // garante que IndexedDB confirmou antes de sair
+      this.destroy();
+      App.navigate('/');
     });
     document.getElementById('btn-dxf').addEventListener('click', () => {
       this._saveNow();
@@ -1903,8 +1905,8 @@ const CanvasEditor = {
           <button class="btn-danger-solid" id="prop-delete" style="width:100%;font-size:11px;padding:7px;">Excluir foto</button>
         </div>
       `;
-      document.getElementById('prop-annotate').addEventListener('click', () => {
-        this._saveNow();
+      document.getElementById('prop-annotate').addEventListener('click', async () => {
+        await this._saveNow();   // garante save antes de sair do editor
         this.destroy();
         PhotoAnnotator.open(this.project.id, elem.id);
       });
@@ -2468,12 +2470,12 @@ const CanvasEditor = {
     this._saveTimer = setTimeout(() => this._saveNow(), 2000);
   },
 
-  _saveNow() {
+  async _saveNow() {
     if (!this.project) return;
     this.project.canvas.zoom = this.zoom;
     this.project.canvas.panX = this.panX;
     this.project.canvas.panY = this.panY;
-    const result = Storage.save(this.project);
+    const result = await Storage.save(this.project);
     if (result && result.error === 'quota') {
       this._setSaveState('error');
       Toast.show(
