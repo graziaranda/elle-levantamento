@@ -562,7 +562,10 @@ const CanvasEditor = {
   // ── Walls ────────────────────────────────
 
   _drawWalls(ctx) {
-    for (const w of this.project.canvas.walls) {
+    const walls = this.project.canvas.walls;
+
+    // ── Passo 1: desenhar os corpos das paredes ──
+    for (const w of walls) {
       const sel = this.selected?.id === w.id;
       ctx.strokeStyle = sel ? '#C9A84C' : '#F0EBE0';
       ctx.lineWidth   = w.thickness || 150;
@@ -572,28 +575,59 @@ const CanvasEditor = {
       ctx.moveTo(w.x1, w.y1);
       ctx.lineTo(w.x2, w.y2);
       ctx.stroke();
+    }
 
-      // Wall length label (show when selected or zoom is high)
-      if (sel || this.zoom > 0.3) {
-        const len = dist(w.x1, w.y1, w.x2, w.y2);
-        const mx  = (w.x1 + w.x2) / 2;
-        const my  = (w.y1 + w.y2) / 2;
-        const ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
-        const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
-        ctx.save();
-        ctx.translate(mx, my);
-        ctx.rotate(ang);
-        const fs = 14 / this.zoom;
-        ctx.font = `500 ${fs}px Inter,sans-serif`;
-        ctx.textAlign = 'center';
-        // fundo para leitura
-        const tw = ctx.measureText(label).width;
-        ctx.fillStyle = '#1A1814';
-        ctx.fillRect(-tw / 2 - 4 / this.zoom, -fs - 11 / this.zoom, tw + 8 / this.zoom, fs + 5 / this.zoom);
-        ctx.fillStyle = sel ? 'rgba(201,168,76,0.95)' : 'rgba(200,184,150,0.85)';
-        ctx.fillText(label, 0, -10 / this.zoom);
-        ctx.restore();
+    // ── Passo 2: preencher cantos onde paredes se conectam ──
+    // O lineCap:'square' não cobre o "bolso" interno do encontro de duas paredes.
+    // Solução: para cada endpoint que pertence a mais de uma parede, preencher
+    // um quadrado (thickness × thickness) — elimina o chanfro escuro no canto.
+    const endpointKey = (x, y) => `${Math.round(x)},${Math.round(y)}`;
+    const endpointMap = new Map(); // key → { x, y, maxThickness, walls[] }
+
+    for (const w of walls) {
+      const t = w.thickness || 150;
+      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
+        const k = endpointKey(px, py);
+        if (!endpointMap.has(k)) endpointMap.set(k, { x: px, y: py, maxT: t, count: 0 });
+        const ep = endpointMap.get(k);
+        ep.count++;
+        if (t > ep.maxT) ep.maxT = t;
       }
+    }
+
+    for (const ep of endpointMap.values()) {
+      if (ep.count < 2) continue;  // endpoint livre — não precisa preencher
+      const h = ep.maxT / 2;
+      // Preenche com a cor de parede padrão (não selecionada)
+      ctx.fillStyle = '#F0EBE0';
+      ctx.fillRect(ep.x - h, ep.y - h, ep.maxT, ep.maxT);
+    }
+
+    // ── Passo 3: labels de comprimento ──
+    // Mostrar sempre que a parede tiver pelo menos 80px na tela (independe do zoom).
+    for (const w of walls) {
+      const sel = this.selected?.id === w.id;
+      const len = dist(w.x1, w.y1, w.x2, w.y2);
+      const lenScreen = len * this.zoom;
+      if (!sel && lenScreen < 80) continue;  // parede muito pequena na tela — omitir
+
+      const mx  = (w.x1 + w.x2) / 2;
+      const my  = (w.y1 + w.y2) / 2;
+      const ang = Math.atan2(w.y2 - w.y1, w.x2 - w.x1);
+      const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+
+      ctx.save();
+      ctx.translate(mx, my);
+      ctx.rotate(ang);
+      const fs = 14 / this.zoom;
+      ctx.font = `500 ${fs}px Inter,sans-serif`;
+      ctx.textAlign = 'center';
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = '#1A1814';
+      ctx.fillRect(-tw / 2 - 4 / this.zoom, -fs - 11 / this.zoom, tw + 8 / this.zoom, fs + 5 / this.zoom);
+      ctx.fillStyle = sel ? 'rgba(201,168,76,0.95)' : 'rgba(200,184,150,0.85)';
+      ctx.fillText(label, 0, -10 / this.zoom);
+      ctx.restore();
     }
   },
 
