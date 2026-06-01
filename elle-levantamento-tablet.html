@@ -1994,91 +1994,56 @@ const DxfWriter = {
   _writeWalls(L, c) {
     const walls    = c.walls    || [];
     const openings = c.openings || [];
-    const SNAP     = 20; // tolerância de conexão em mm
+    const SNAP     = 20;
 
-    // Interseção de duas linhas paramétricas (p1 + t·d1 = p2 + s·d2)
-    const lineIsect = (p1, d1, p2, d2) => {
-      const cross = d1.x * d2.y - d1.y * d2.x;
-      if (Math.abs(cross) < 0.001) return null;
-      const dx = p2.x - p1.x, dy = p2.y - p1.y;
-      const t  = (dx * d2.y - dy * d2.x) / cross;
-      return { x: p1.x + t * d1.x, y: p1.y + t * d1.y };
-    };
-
-    // Encontra outra parede conectada num endpoint
-    const getConn = (w, px, py) =>
-      walls.find(o => o !== w && (
+    // Verifica se endpoint conecta a outra parede
+    const isConn = (w, px, py) =>
+      walls.some(o => o !== w && (
         (Math.abs(o.x1 - px) < SNAP && Math.abs(o.y1 - py) < SNAP) ||
         (Math.abs(o.x2 - px) < SNAP && Math.abs(o.y2 - py) < SNAP)
       ));
 
-    // Ponto de miter entre esta parede e a conectada num endpoint (sign: +1 ou -1)
-    const miterAt = (px, py, ux, uy, t, connW, sign) => {
-      if (!connW) return { x: px - ux * sign * t, y: py - uy * sign * t };
-      const cdx = connW.x2 - connW.x1, cdy = connW.y2 - connW.y1;
-      const clen = Math.sqrt(cdx*cdx + cdy*cdy);
-      if (!clen) return { x: px - ux * sign * t, y: py - uy * sign * t };
-      const cux = cdx/clen, cuy = cdy/clen;
-      const cnx = -cuy * t, cny = cux * t;
-      // Face desta parede + face da parede conectada → interseção
-      const pThis = { x: px + (-uy) * t * sign, y: py + ux * t * sign };
-      const pConn = { x: px + cnx * sign,        y: py + cny * sign };
-      const isect = lineIsect(pThis, { x: ux, y: uy }, pConn, { x: cux, y: cuy });
-      return isect || pThis;
-    };
-
     for (const w of walls) {
-      const t   = (w.thickness || 150) / 2;
-      const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const t  = (w.thickness || 150) / 2;
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx*dx + dy*dy);
       if (!len) continue;
       const ux = dx/len, uy = dy/len;
+      const ox = -uy * t, oy = ux * t; // offset perpendicular
 
-      const connS = getConn(w, w.x1, w.y1); // parede conectada no início
-      const connE = getConn(w, w.x2, w.y2); // parede conectada no fim
-
-      // Aberturas desta parede
-      const wOpenings = openings
+      // Aberturas desta parede (corte nas faces)
+      const cuts = openings
         .filter(o => o.wallId === w.id)
-        .map(o => ({
-          s: len * o.position - (o.width || 900) / 2,
-          e: len * o.position + (o.width || 900) / 2,
-        }))
+        .map(o => ({ s: len*o.position - (o.width||900)/2, e: len*o.position + (o.width||900)/2 }))
         .sort((a, b) => a.s - b.s);
 
-      // Pontos de miter nas duas extremidades para cada face (sign +1 / -1)
-      const drawFace = (sign) => {
-        const ptS = miterAt(w.x1, w.y1, -ux, -uy, t, connS, sign);
-        const ptE = miterAt(w.x2, w.y2,  ux,  uy, t, connE, sign);
-        const ox  = (-uy) * t * sign, oy = ux * t * sign;
-
-        let seg = [ptS]; // segmentos ao longo da face
-        // Pontos ao longo da face na coordenada paramétrica "along"
-        const faceX = w.x1 + ox, faceY = w.y1 + oy;
-        // Adiciona pontos de corte do vão
+      // Desenha face com cortes nos vãos (fx,fy = offset perpendicular)
+      const drawFace = (fx, fy) => {
         let cur = 0;
-        for (const vao of wOpenings) {
-          const s = Math.max(0, vao.s), e = Math.min(len, vao.e);
-          if (s > cur) {
-            seg.push({ x: faceX + ux * s, y: faceY + uy * s });
-            this._line(L, 'PAREDES', seg[seg.length-2].x, seg[seg.length-2].y,
-                                      seg[seg.length-1].x, seg[seg.length-1].y);
+        for (const cut of cuts) {
+          const cs = Math.max(0, cut.s), ce = Math.min(len, cut.e);
+          if (cs > cur) {
+            this._line(L, 'PAREDES',
+              w.x1 + ux*cur + fx, w.y1 + uy*cur + fy,
+              w.x1 + ux*cs  + fx, w.y1 + uy*cs  + fy);
           }
-          seg = [{ x: faceX + ux * e, y: faceY + uy * e }];
-          cur = e;
+          cur = ce;
         }
-        // Último segmento até o miter fim
-        this._line(L, 'PAREDES', seg[0].x, seg[0].y, ptE.x, ptE.y);
+        if (cur < len) {
+          this._line(L, 'PAREDES',
+            w.x1 + ux*cur + fx, w.y1 + uy*cur + fy,
+            w.x2 + fx, w.y2 + fy);
+        }
       };
 
-      drawFace(+1);
-      drawFace(-1);
+      drawFace( ox,  oy);
+      drawFace(-ox, -oy);
 
-      // Tampa só em extremidades livres
-      if (!connS) this._line(L, 'PAREDES',
-        w.x1 + (-uy)*t, w.y1 + ux*t, w.x1 - (-uy)*t, w.y1 - ux*t);
-      if (!connE) this._line(L, 'PAREDES',
-        w.x2 + (-uy)*t, w.y2 + ux*t, w.x2 - (-uy)*t, w.y2 - ux*t);
+      // Tampas só em extremidades livres (sem conexão)
+      if (!isConn(w, w.x1, w.y1))
+        this._line(L, 'PAREDES', w.x1+ox, w.y1+oy, w.x1-ox, w.y1-oy);
+      if (!isConn(w, w.x2, w.y2))
+        this._line(L, 'PAREDES', w.x2+ox, w.y2+oy, w.x2-ox, w.y2-oy);
     }
   },
 
