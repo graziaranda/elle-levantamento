@@ -4,6 +4,11 @@
    Coordenadas internas: milímetros
    ═══════════════════════════════════════════ */
 
+// Formata mm → "X,XXm" (sempre metros, 2 casas decimais, vírgula PT-BR)
+function fmtM(mm) {
+  return (mm / 1000).toFixed(2).replace('.', ',') + 'm';
+}
+
 const CanvasEditor = {
 
   // ── State ─────────────────────────────────
@@ -883,7 +888,7 @@ const CanvasEditor = {
       let ang = Math.atan2(dy, dx);
       if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
 
-      const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+      const label = fmtM(len);
 
       ctx.save();
       ctx.translate(mx, my);
@@ -1100,9 +1105,7 @@ const CanvasEditor = {
 
       // Label de valor
       const val   = d.value != null ? d.value : Math.round(len);
-      const label = val >= 1000
-        ? `${(val / 1000).toFixed(3).replace('.', ',')}m`
-        : `${val}mm`;
+      const label = fmtM(val);
       const mx = (p1.x + p2.x) / 2;
       const my = (p1.y + p2.y) / 2;
       const fs = 14 / this.zoom;
@@ -1317,7 +1320,7 @@ const CanvasEditor = {
       // Length label
       const len = dist(x1, y1, x2, y2);
       if (len > 10) {
-        const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+        const label = fmtM(len);
         const fs = 16 / this.zoom;
         ctx.font      = `600 ${fs}px Inter,sans-serif`;
         ctx.textAlign = 'center';
@@ -1352,7 +1355,7 @@ const CanvasEditor = {
 
     if (this.currentTool === 'dimension') {
       const len = dist(x1, y1, x2, y2);
-      const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+      const label = fmtM(len);
       ctx.strokeStyle = 'rgba(201,168,76,0.5)';
       ctx.lineWidth   = 2 / this.zoom;
       ctx.setLineDash([150 / this.zoom, 80 / this.zoom]);
@@ -2201,9 +2204,7 @@ const CanvasEditor = {
       }
       // Label: distância da FACE até o vão = exatamente o que o usuário digitou
       const userMm = Math.max(0, dist(faceX, faceY, edgeX, edgeY));
-      const distLabel = userMm >= 1000
-        ? `${(userMm / 1000).toFixed(2)}m`
-        : `${Math.round(userMm)}mm`;
+      const distLabel = fmtM(userMm);
       const mx2 = (faceX + edgeX) / 2 + offPerp.x * 1.4;
       const my2 = (faceY + edgeY) / 2 + offPerp.y * 1.4;
       const fs2 = 12 / this.zoom;
@@ -2384,9 +2385,7 @@ const CanvasEditor = {
         ctx.stroke();
       }
       const userMm = Math.max(0, dist(faceX, faceY, ip.x, ip.y));
-      const lbl = userMm >= 1000
-        ? `${(userMm/1000).toFixed(2)}m`
-        : `${Math.round(userMm)}mm`;
+      const lbl = fmtM(userMm);
       const mx2 = (faceX + ip.x)/2 + offP.x*1.4;
       const my2 = (faceY + ip.y)/2 + offP.y*1.4;
       const fs2 = 11 / this.zoom;
