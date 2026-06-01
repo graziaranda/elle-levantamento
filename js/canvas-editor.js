@@ -580,7 +580,7 @@ const CanvasEditor = {
     // O Canvas API resolve automaticamente o canto (miter join) — sem gaps,
     // sem bumps, funciona para 90°, 45° e qualquer ângulo.
 
-    const SNAP = 5; // tolerância de snap em mm
+    const SNAP = 20; // tolerância de snap em mm — cobre floating point de paredes diagonais
     const epKey = (x, y) => `${Math.round(x / SNAP)},${Math.round(y / SNAP)}`;
 
     // 1. Mapa: endpoint_key → lista de [wallId, qual_end ('1'|'2')]
@@ -654,35 +654,11 @@ const CanvasEditor = {
       for (let i = 1; i < chain.pts.length; i++) {
         ctx.lineTo(chain.pts[i].x, chain.pts[i].y);
       }
+      // Fechar o loop se o último ponto coincidir com o primeiro (ambiente fechado)
+      const p0 = chain.pts[0], pN = chain.pts[chain.pts.length - 1];
+      const closeD = Math.sqrt((pN.x - p0.x) ** 2 + (pN.y - p0.y) ** 2);
+      if (closeD < 25) ctx.closePath(); // ≤ 25mm → loop fechado
       ctx.stroke();
-    }
-
-    // 4. Disco nos endpoints compartilhados — cobre gaps residuais em T-junctions
-    // e qualquer ângulo que o miter não cubra (3 paredes no mesmo ponto, etc.)
-    ctx.fillStyle = '#F0EBE0';
-    for (const ep of endMap.values()) {
-      const count = ep.reduce ? ep.reduce((n, _) => n + 1, 0) : ep.length;
-      if (count < 2) continue;
-    }
-    // Reconstruir mapa de contagem simples para o disco
-    const epCount = new Map();
-    for (const w of walls) {
-      const t = w.thickness || 150;
-      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
-        const k = epKey(px, py);
-        if (!epCount.has(k)) epCount.set(k, { x: px, y: py, t, n: 0 });
-        const ep = epCount.get(k);
-        ep.n++;
-        if (t > ep.t) ep.t = t;
-      }
-    }
-    ctx.fillStyle = '#F0EBE0';
-    for (const ep of epCount.values()) {
-      if (ep.n < 2) continue;
-      // Disco de raio t/√2 cobre o canto externo de junções a 90° e diagonais
-      ctx.beginPath();
-      ctx.arc(ep.x, ep.y, ep.t / Math.SQRT2, 0, Math.PI * 2);
-      ctx.fill();
     }
 
     // ── Labels de comprimento ──
