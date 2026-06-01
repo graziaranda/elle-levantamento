@@ -563,70 +563,103 @@ const CanvasEditor = {
 
   _drawWalls(ctx) {
     const walls = this.project.canvas.walls;
+    if (!walls.length) return;
 
-    // ── Passo 1: corpo das paredes como fillRect rotacionado ──
-    // Sem lineCap — sem extensão além dos endpoints — sem bumps diagonais.
+    // ── Abordagem: paths conectados com lineJoin:'miter' ──
+    // Paredes que se conectam num endpoint são desenhadas como um único path.
+    // O Canvas API resolve automaticamente o canto (miter join) — sem gaps,
+    // sem bumps, funciona para 90°, 45° e qualquer ângulo.
+
+    const SNAP = 5; // tolerância de snap em mm
+    const epKey = (x, y) => `${Math.round(x / SNAP)},${Math.round(y / SNAP)}`;
+
+    // 1. Mapa: endpoint_key → lista de [wallId, qual_end ('1'|'2')]
+    const endMap = new Map();
     for (const w of walls) {
-      const sel = this.selected?.id === w.id;
-      const t   = w.thickness || 150;
-      const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      if (!len) continue;
-
-      ctx.fillStyle = sel ? '#C9A84C' : '#F0EBE0';
-      ctx.save();
-      ctx.translate(w.x1, w.y1);
-      ctx.rotate(Math.atan2(dy, dx));
-      ctx.fillRect(0, -t / 2, len, t);
-      ctx.restore();
-    }
-
-    // ── Passo 2: quadrado nos endpoints compartilhados ──
-    // Quando duas paredes se encontram num endpoint, a fillRect de cada uma
-    // não cobre o "canto externo" — falta um triângulo de ~(t/2)×(t/2).
-    // Um quadrado t×t centrado no endpoint cobre esse gap em qualquer ângulo.
-    const epMap = new Map();
-    const epKey = (x, y) => `${Math.round(x / 10)},${Math.round(y / 10)}`; // 10mm de tolerância
-
-    for (const w of walls) {
-      const t = w.thickness || 150;
-      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
+      for (const [px, py, end] of [[w.x1, w.y1, '1'], [w.x2, w.y2, '2']]) {
         const k = epKey(px, py);
-        if (!epMap.has(k)) epMap.set(k, { x: px, y: py, t, count: 0 });
-        const ep = epMap.get(k);
-        ep.count++;
-        if (t > ep.t) ep.t = t;
+        if (!endMap.has(k)) endMap.set(k, []);
+        endMap.get(k).push({ wid: w.id, end });
       }
     }
-    // Disco preenchido no endpoint: cobre o gap em QUALQUER ângulo de junção.
-    // Um fillRect (quadrado) só funciona para 90°; o círculo garante cobertura
-    // para diagonais (45°, 30°, qualquer ângulo) sem criar bump visível.
-    ctx.fillStyle = '#F0EBE0';
-    for (const ep of epMap.values()) {
-      if (ep.count < 2) continue;
-      ctx.beginPath();
-      ctx.arc(ep.x, ep.y, ep.t / 2, 0, Math.PI * 2);
-      ctx.fill();
+
+    // 2. Montar cadeias: sequência de pontos para um único path
+    const used   = new Set();
+    const chains = [];
+
+    const wallById = id => walls.find(w => w.id === id);
+
+    const followChain = (startWall, startEnd) => {
+      // Percorre a cadeia de paredes conectadas ponta a ponta
+      const pts = [];
+      let w   = startWall;
+      let end = startEnd; // extremidade pela qual saímos
+
+      while (w && !used.has(w.id)) {
+        used.add(w.id);
+        const [px, py] = end === '1' ? [w.x1, w.y1] : [w.x2, w.y2];
+        pts.push({ x: px, y: py, wid: w.id });
+
+        // Outro endpoint deste segmento
+        const [ox, oy] = end === '1' ? [w.x2, w.y2] : [w.x1, w.y1];
+        pts.push({ x: ox, y: oy, wid: null }); // ponto final do segmento
+
+        // Tentar continuar para a próxima parede conectada no outro endpoint
+        const nextKey = epKey(ox, oy);
+        const nexts   = (endMap.get(nextKey) || []).filter(e => e.wid !== w.id && !used.has(e.wid));
+        if (nexts.length === 1) {
+          const nxt = wallById(nexts[0].wid);
+          end = nexts[0].end === '1' ? '2' : '1'; // vamos sair pelo outro lado
+          w   = nxt;
+          pts.pop(); // o ponto final do segmento vira o inicial do próximo
+        } else {
+          w = null;
+        }
+      }
+      return pts;
+    };
+
+    for (const w of walls) {
+      if (used.has(w.id)) continue;
+      // Encontrar a ponta "livre" (não conectada a outra parede já visitada)
+      // para começar a cadeia de trás para frente
+      const k1 = epKey(w.x1, w.y1);
+      const k2 = epKey(w.x2, w.y2);
+      const free1 = !(endMap.get(k1) || []).some(e => e.wid !== w.id);
+      const startEnd = free1 ? '1' : '2'; // começa pela ponta livre se existir
+      const pts = followChain(w, startEnd);
+      if (pts.length >= 2) chains.push({ pts, thickness: w.thickness || 150, sel: this.selected?.id === w.id });
     }
 
-    // ── Passo 3: labels de comprimento ──
-    // Sempre visíveis quando a parede ≥ 80px na tela.
-    // Ângulo normalizado: texto nunca aparece de cabeça para baixo.
+    // 3. Desenhar cada cadeia como único path
+    ctx.lineCap  = 'square';
+    ctx.lineJoin = 'miter';
+    ctx.miterLimit = 10;
+
+    for (const chain of chains) {
+      ctx.strokeStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
+      ctx.lineWidth   = chain.thickness;
+      ctx.beginPath();
+      ctx.moveTo(chain.pts[0].x, chain.pts[0].y);
+      for (let i = 1; i < chain.pts.length; i++) {
+        ctx.lineTo(chain.pts[i].x, chain.pts[i].y);
+      }
+      ctx.stroke();
+    }
+
+    // ── Labels de comprimento ──
+    // Visíveis quando a parede ≥ 80px na tela. Texto normalizado (nunca invertido).
     for (const w of walls) {
       const sel = this.selected?.id === w.id;
       const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
       if (!sel && len * this.zoom < 80) continue;
 
-      const mx  = (w.x1 + w.x2) / 2;
-      const my  = (w.y1 + w.y2) / 2;
-      // Normaliza o ângulo para o texto sempre ler da esquerda para a direita
+      const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
       let ang = Math.atan2(dy, dx);
       if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
 
-      const label = len >= 1000
-        ? `${(len / 1000).toFixed(2)}m`
-        : `${Math.round(len)}mm`;
+      const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
 
       ctx.save();
       ctx.translate(mx, my);
