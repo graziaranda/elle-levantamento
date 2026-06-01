@@ -3079,10 +3079,11 @@ const CanvasEditor = {
       if (pts.length >= 2) chains.push({ pts, thickness: w.thickness || 150, sel: this.selected?.id === w.id });
     }
 
-    // 3. Desenhar cada cadeia como único path (lineJoin:miter para cantos limpos)
-    ctx.lineCap    = 'square';
-    ctx.lineJoin   = 'miter';
-    ctx.miterLimit = 10;
+    // 3. Desenhar cada cadeia como único path
+    // lineJoin:'round' elimina notches/gaps em QUALQUER ângulo (diagonal, agudo, obtuso).
+    // O arredondamento (raio = espessura/2) é mínimo na escala de planta.
+    ctx.lineCap  = 'round';
+    ctx.lineJoin = 'round';
 
     for (const chain of chains) {
       ctx.strokeStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
