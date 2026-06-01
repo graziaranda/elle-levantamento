@@ -3079,46 +3079,93 @@ const CanvasEditor = {
       if (pts.length >= 2) chains.push({ pts, thickness: w.thickness || 150, sel: this.selected?.id === w.id });
     }
 
-    // 3a. Disco nos endpoints conectados — preenchido ANTES das paredes.
-    // Cobre o V-notch interno gerado pelo lineJoin:miter em ângulos não-90°.
-    // Por ficar embaixo das paredes (mesma cor), só aparece no gap interno.
-    const epFill = new Map();
-    for (const w of walls) {
-      const t = w.thickness || 150;
-      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
-        const k = epKey(px, py);
-        if (!epFill.has(k)) epFill.set(k, { x: px, y: py, t, n: 0 });
-        const ep = epFill.get(k);
-        ep.n++;
-        if (t > ep.t) ep.t = t;
-      }
-    }
-    ctx.fillStyle = '#F0EBE0';
-    for (const ep of epFill.values()) {
-      if (ep.n < 2) continue;
-      ctx.beginPath();
-      ctx.arc(ep.x, ep.y, ep.t * 0.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // 3. Paredes como POLÍGONOS preenchidos com miter calculado matematicamente.
+    // Cada cadeia gera um polígono contínuo com cantos vivos em qualquer ângulo.
+    // SEM lineJoin (não usa stroke), SEM discos — resultado limpo e arquitetonicamente correto.
 
-    // 3b. Paredes como paths conectados com cantos vivos (miter) — padrão de planta baixa
-    ctx.lineCap    = 'square';
-    ctx.lineJoin   = 'miter';
-    ctx.miterLimit = 10;
+    // Calcula interseção de duas linhas: (p1 + t*d1) = (p2 + s*d2)
+    const lineIsect = (p1, d1, p2, d2) => {
+      const cross = d1.x * d2.y - d1.y * d2.x;
+      if (Math.abs(cross) < 0.001) return null; // paralelas
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      const t  = (dx * d2.y - dy * d2.x) / cross;
+      return { x: p1.x + t * d1.x, y: p1.y + t * d1.y };
+    };
+
+    // Gera o polígono de contorno para uma cadeia de pontos com espessura t
+    const chainPoly = (pts, t, closed) => {
+      const n   = pts.length;
+      const h   = t / 2;
+      const seg = []; // { nx, ny, dx, dy } por segmento
+      for (let i = 0; i < n - 1; i++) {
+        const dx = pts[i+1].x - pts[i].x, dy = pts[i+1].y - pts[i].y;
+        const len = Math.sqrt(dx*dx + dy*dy);
+        if (!len) { seg.push({ nx:0, ny:0, dx:0, dy:0 }); continue; }
+        const nx = -dy/len, ny = dx/len; // normal esquerda
+        seg.push({ nx, ny, dx: dx/len, dy: dy/len });
+      }
+      // Calcula ponto de miter para o lado "esq" ou "dir" em cada junction
+      const miterPt = (i, sign) => {
+        // i = índice do junction (entre seg[i-1] e seg[i])
+        const s1 = seg[i-1], s2 = seg[i];
+        const P  = pts[i];
+        const p1 = { x: P.x + sign*s1.nx*h, y: P.y + sign*s1.ny*h };
+        const p2 = { x: P.x + sign*s2.nx*h, y: P.y + sign*s2.ny*h };
+        const isect = lineIsect(p1, { x: s1.dx, y: s1.dy }, p2, { x: s2.dx, y: s2.dy });
+        if (!isect) return p1;
+        // Limitar miter excessivo (evita spikes em ângulos muito agudos)
+        const dMiter = Math.sqrt((isect.x-P.x)**2 + (isect.y-P.y)**2);
+        if (dMiter > h * 8) return p1; // fallback para bevel
+        return isect;
+      };
+
+      const left = [], right = [];
+      const ns = seg.length;
+
+      for (let i = 0; i <= ns; i++) {
+        if (i === 0) {
+          if (closed) {
+            left.push(miterPt(0, 1));
+            right.push(miterPt(0, -1));
+          } else {
+            left.push({ x: pts[0].x + seg[0].nx*h, y: pts[0].y + seg[0].ny*h });
+            right.push({ x: pts[0].x - seg[0].nx*h, y: pts[0].y - seg[0].ny*h });
+          }
+        } else if (i === ns) {
+          if (closed) {
+            left.push(left[0]); right.push(right[0]);
+          } else {
+            const s = seg[ns-1];
+            const P = pts[ns];
+            left.push({ x: P.x + s.nx*h, y: P.y + s.ny*h });
+            right.push({ x: P.x - s.nx*h, y: P.y - s.ny*h });
+          }
+        } else {
+          left.push(miterPt(i, 1));
+          right.push(miterPt(i, -1));
+        }
+      }
+
+      return [...left, ...[...right].reverse()];
+    };
 
     for (const chain of chains) {
-      ctx.strokeStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
-      ctx.lineWidth   = chain.thickness;
+      const t      = chain.thickness;
+      const pts    = chain.pts;
+      const p0     = pts[0], pN = pts[pts.length-1];
+      const closed = Math.sqrt((pN.x-p0.x)**2+(pN.y-p0.y)**2) < 25;
+
+      // Para loop fechado, fechar a array de pontos para calcular miter no closing corner
+      const polyPts = closed ? [...pts, pts[1]] : pts;
+      if (polyPts.length < 2) continue;
+
+      const poly = chainPoly(polyPts, t, closed);
+      ctx.fillStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
       ctx.beginPath();
-      ctx.moveTo(chain.pts[0].x, chain.pts[0].y);
-      for (let i = 1; i < chain.pts.length; i++) {
-        ctx.lineTo(chain.pts[i].x, chain.pts[i].y);
-      }
-      // Fechar o loop se o último ponto coincidir com o primeiro (ambiente fechado)
-      const p0 = chain.pts[0], pN = chain.pts[chain.pts.length - 1];
-      const closeD = Math.sqrt((pN.x - p0.x) ** 2 + (pN.y - p0.y) ** 2);
-      if (closeD < 25) ctx.closePath();
-      ctx.stroke();
+      ctx.moveTo(poly[0].x, poly[0].y);
+      for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+      ctx.closePath();
+      ctx.fill();
     }
 
     // ── Labels de comprimento ──
@@ -4628,7 +4675,10 @@ const CanvasEditor = {
       : { width: 1200, height: 1000, sill: 1000 };
     data.fromEnd = 'start';
     const centerMm = Math.max(0, Math.min(wallLen, position * wallLen));
-    data.distCm = Math.max(0, Math.round((centerMm - data.width / 2) / 10));
+    // Offset para face interna da parede: a distância exibida parte da face ACABADA,
+    // não do eixo. Diferença = espessura/2 (ex: parede 15cm → offset 7,5cm).
+    const faceOffset = (wall.thickness || 150) / 2;
+    data.distCm = Math.max(0, Math.round((centerMm - data.width / 2 - faceOffset) / 10));
 
     const numField = (key, label, val) => `
       <div class="form-group">
@@ -4688,9 +4738,11 @@ const CanvasEditor = {
     const computePosition = () => {
       const width = readCm('op-width') || 1;
       const distM = readCm('op-dist');
+      // Somar faceOffset: o usuário digita da face acabada, não do eixo
+      const faceMm = (wall.thickness || 150) / 2;
       let centerFromStart = (data.fromEnd === 'start')
-        ? distM + width / 2
-        : wallLen - (distM + width / 2);
+        ? distM + width / 2 + faceMm
+        : wallLen - (distM + width / 2 + faceMm);
       const minC = width / 2, maxC = wallLen - width / 2;
       centerFromStart = Math.max(minC, Math.min(maxC, centerFromStart));
       return wallLen > 0 ? centerFromStart / wallLen : 0.5;
