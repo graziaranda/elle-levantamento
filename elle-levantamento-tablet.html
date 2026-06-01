@@ -3678,7 +3678,15 @@ const CanvasEditor = {
       return;
     }
 
-    if (this.currentTool === 'wall' && this._aiming) { this._wallAim(raw); return; }
+    if (this.currentTool === 'wall' && this._aiming) {
+      this._wallAim(raw);
+      // Mostrar "Conectar" também durante o aim — quando o endpoint apontado
+      // está perto de um endpoint existente (para fechar o ambiente ou conectar)
+      this._wallSnapPt = this._snapToWallEndpoint(this.mouseWorld || raw);
+      this._archSnapPt = null;
+      this._draw();
+      return;
+    }
     if (this._aimingInstall)  { this._installAim(raw); return; }
     if (this._aimingOpening) { this._openingAim(raw); return; }
 
@@ -3690,10 +3698,13 @@ const CanvasEditor = {
       this._wallSnapPt = null;
       if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
     // Snap magnético de parede: mostra ímã verde ao se aproximar de endpoint
-    } else if (this.currentTool === 'wall' && !this.drawStart) {
+    // — funciona TANTO antes do 1º ponto QUANTO antes do 2º (aim)
+    } else if (this.currentTool === 'wall') {
       this._wallSnapPt = this._snapToWallEndpoint(raw);
       this._archSnapPt = null;
-      if (this._wallSnapPt) this.mouseWorld = this._wallSnapPt;
+      if (this._wallSnapPt && !this.drawStart) {
+        this.mouseWorld = this._wallSnapPt; // só snapa o cursor no início
+      }
     } else {
       this._archSnapPt = null;
       this._wallSnapPt = null;
@@ -5400,15 +5411,18 @@ const CanvasEditor = {
 
       this.mouseWorld = this._snapWorld(raw, false);
 
-      // Snap magnético de cota no touch move
+      // Snap magnético — cota e paredes (início e aim)
       if (this.currentTool === 'dimension') {
         this._archSnapPt = this._snapToArchPoint(raw);
         this._wallSnapPt = null;
         if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
-      } else if (this.currentTool === 'wall' && !this.drawStart) {
-        this._wallSnapPt = this._snapToWallEndpoint(raw);
+      } else if (this.currentTool === 'wall') {
+        // "Conectar" aparece tanto antes do 1º ponto quanto durante o aim
+        this._wallSnapPt = this._snapToWallEndpoint(this._aiming ? (this.mouseWorld || raw) : raw);
         this._archSnapPt = null;
-        if (this._wallSnapPt) this.mouseWorld = this._wallSnapPt;
+        if (this._wallSnapPt && !this.drawStart) {
+          this.mouseWorld = this._wallSnapPt;
+        }
       } else {
         this._archSnapPt = null;
         this._wallSnapPt = null;
