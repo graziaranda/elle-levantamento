@@ -535,11 +535,14 @@ const CanvasEditor = {
       ]) {
         const toX = rawWorld.x - px, toY = rawWorld.y - py;
         const onNSide = nx * toX + ny * toY; // positivo = usuário está do lado do normal
-        if (onNSide > 0) {
-          candidates.push({ x: px + nx*t, y: py + ny*t, label: 'Face', priority: 1 });
-        } else {
-          candidates.push({ x: px - nx*t, y: py - ny*t, label: 'Face', priority: 1 });
-        }
+        const sign = onNSide > 0 ? 1 : -1;
+        const fx = sign * nx * t, fy = sign * ny * t;
+        // faceSeg: linha completa da face capturada — usada p/ highlight visual
+        candidates.push({
+          x: px + fx, y: py + fy,
+          label: 'Face', priority: 1,
+          faceSeg: { x1: w.x1 + fx, y1: w.y1 + fy, x2: w.x2 + fx, y2: w.y2 + fy },
+        });
       }
     }
 
@@ -1866,37 +1869,30 @@ const CanvasEditor = {
     if (!pt) return;
     const r = 14 / this.zoom;
 
-    // Círculo externo — preto com borda para visibilidade
-    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-    ctx.lineWidth   = 2 / this.zoom;
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, r * 1.6, 0, Math.PI * 2); ctx.stroke();
-
-    // Cruz preta
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth   = 2.5 / this.zoom;
-    ctx.beginPath();
-    ctx.moveTo(pt.x - r, pt.y); ctx.lineTo(pt.x + r, pt.y);
-    ctx.moveTo(pt.x, pt.y - r); ctx.lineTo(pt.x, pt.y + r);
-    ctx.stroke();
-
-    // Badge preto + texto branco
-    if (pt.label) {
-      const fs  = 11 / this.zoom;
-      const pad = 4  / this.zoom;
-      ctx.font = `700 ${fs}px Inter,sans-serif`;
-      ctx.textAlign    = 'center';
-      ctx.textBaseline = 'bottom';
-      const tw = ctx.measureText(pt.label).width;
-      const bx = pt.x - tw / 2 - pad;
-      const by = pt.y - r * 1.6 - fs - pad * 2;
-      ctx.fillStyle = 'rgba(0,0,0,0.92)';
+    // Linha da face destacada — ciano sobre a parede para mostrar QUAL face
+    if (pt.faceSeg) {
+      const s = pt.faceSeg;
+      ctx.save();
+      ctx.strokeStyle = '#00C8FF';
+      ctx.lineWidth   = 3.5 / this.zoom;
+      ctx.setLineDash([]);
       ctx.beginPath();
-      ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
-      ctx.fill();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillText(pt.label, pt.x, by + fs + pad * 0.75);
-      ctx.textBaseline = 'alphabetic';
+      ctx.moveTo(s.x1, s.y1);
+      ctx.lineTo(s.x2, s.y2);
+      ctx.stroke();
+      ctx.restore();
     }
+
+    // Círculo + cruz no ponto exato da face
+    ctx.strokeStyle = '#00C8FF';
+    ctx.lineWidth   = 2 / this.zoom;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.lineWidth = 2.5 / this.zoom;
+    ctx.beginPath();
+    ctx.moveTo(pt.x - r * 0.7, pt.y); ctx.lineTo(pt.x + r * 0.7, pt.y);
+    ctx.moveTo(pt.x, pt.y - r * 0.7); ctx.lineTo(pt.x, pt.y + r * 0.7);
+    ctx.stroke();
   },
 
   // Garante que o offset da cota sempre vai para o EXTERIOR do desenho.
