@@ -4042,6 +4042,7 @@ const CanvasEditor = {
     if (!pl) return;
     const w = this.project.canvas.walls.find(w => w.id === pl.wallId);
     if (!w) return;
+
     // Realça a parede
     ctx.save();
     ctx.globalAlpha = 0.3;
@@ -4050,11 +4051,32 @@ const CanvasEditor = {
     ctx.lineCap     = 'round';
     ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
     ctx.restore();
-    // Ponto azul na posição
+
+    // Ponto azul no canto de referência (fixo — âncora de medida)
     if (pl.refX != null) {
+      // Halo externo
+      ctx.strokeStyle = 'rgba(91,155,213,0.4)';
+      ctx.lineWidth   = 2 / this.zoom;
+      ctx.beginPath(); ctx.arc(pl.refX, pl.refY, 18 / this.zoom, 0, Math.PI * 2); ctx.stroke();
+      // Disco sólido
       ctx.fillStyle = '#5B9BD5';
-      ctx.beginPath(); ctx.arc(pl.refX, pl.refY, 12 / this.zoom, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(pl.refX, pl.refY, 11 / this.zoom, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
+    }
+
+    // Linha tracejada do canto até a posição da instalação (quando preview ativo)
+    if (this._installPreview && pl.refX != null) {
+      const ip = this._installPreview;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(91,155,213,0.5)';
+      ctx.lineWidth   = 1.5 / this.zoom;
+      ctx.setLineDash([80 / this.zoom, 50 / this.zoom]);
+      ctx.beginPath();
+      ctx.moveTo(pl.refX, pl.refY);
+      ctx.lineTo(ip.x, ip.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
     }
   },
 
@@ -4145,15 +4167,21 @@ const CanvasEditor = {
 
     const syncPreview = (type, distCm) => {
       if (!type) return;
-      const entry  = getInstallEntry(type);
-      const dMm    = parseLocaleFloat(String(distCm)) * 10;
-      const t      = fromEnd === 'start' ? dMm / wallLen : (wallLen - dMm) / wallLen;
+      const dMm      = parseLocaleFloat(String(distCm)) * 10;
+      const t        = fromEnd === 'start' ? dMm / wallLen : (wallLen - dMm) / wallLen;
       const tClamped = Math.max(0, Math.min(1, t));
-      const px = wall.x1 + (wall.x2 - wall.x1) * tClamped;
-      const py = wall.y1 + (wall.y2 - wall.y1) * tClamped;
+      const px       = wall.x1 + (wall.x2 - wall.x1) * tClamped;
+      const py       = wall.y1 + (wall.y2 - wall.y1) * tClamped;
+
+      // _installPreview = posição da instalação (muda com a distância)
       this._installPreview = { x: px, y: py, type };
-      // Atualiza o ponto azul
-      this._placingInstall = { wallId: wall.id, wallT: tClamped, refX: px, refY: py };
+
+      // _placingInstall.wallT é atualizado mas refX/refY MANTÉM o canto fixo
+      // (o ponto azul deve ficar no canto, não seguir a instalação)
+      if (this._placingInstall) {
+        this._placingInstall.wallT = tClamped;
+        // refX/refY já estão no canto correto via updateCornerRef() — não sobrescrever
+      }
       this._draw();
     };
 
