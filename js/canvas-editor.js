@@ -1147,38 +1147,65 @@ const CanvasEditor = {
 
   // ── Preview (rubber-band) ─────────────────
 
-  // Linhas de projeção: mostra guias tracejadas quando o endpoint atual
-  // se alinha horizontal ou verticalmente com endpoints existentes.
+  // Linhas de projeção: guias tracejadas para alinhamento com paredes existentes.
+  // Verifica: endpoints, midpoints de cada parede — mostra guia H ou V quando alinha.
+  // Ajuda a manter paredes paralelas e perpendiculares durante o desenho.
   _drawProjectionLines(ctx, x2, y2) {
-    const TOL = 8 / this.zoom;  // tolerância de alinhamento em mm (8px)
+    const TOL = 10 / this.zoom;  // 10px de tolerância na tela
     const walls = this.project.canvas.walls;
-    const W = this.canvas.width / this.zoom;
+    const W = this.canvas.width  / this.zoom;
     const H = this.canvas.height / this.zoom;
     const ox = -this.panX / this.zoom;
     const oy = -this.panY / this.zoom;
 
     ctx.save();
-    ctx.setLineDash([80 / this.zoom, 50 / this.zoom]);
-    ctx.lineWidth = 1 / this.zoom;
+    ctx.lineWidth = 1.5 / this.zoom;
 
+    // Pontos estratégicos de cada parede: endpoints + midpoint
+    const pts = [];
     for (const w of walls) {
-      for (const pt of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
-        // Alinhamento vertical (mesmo X)
-        if (Math.abs(pt.x - x2) < TOL && Math.abs(pt.y - y2) > TOL * 2) {
-          ctx.strokeStyle = 'rgba(201,168,76,0.4)';
-          ctx.beginPath();
-          ctx.moveTo(pt.x, oy);
-          ctx.lineTo(pt.x, oy + H);
-          ctx.stroke();
-        }
-        // Alinhamento horizontal (mesmo Y)
-        if (Math.abs(pt.y - y2) < TOL && Math.abs(pt.x - x2) > TOL * 2) {
-          ctx.strokeStyle = 'rgba(201,168,76,0.4)';
-          ctx.beginPath();
-          ctx.moveTo(ox,     pt.y);
-          ctx.lineTo(ox + W, pt.y);
-          ctx.stroke();
-        }
+      pts.push({ x: w.x1, y: w.y1 });
+      pts.push({ x: w.x2, y: w.y2 });
+      pts.push({ x: (w.x1 + w.x2) / 2, y: (w.y1 + w.y2) / 2 });
+    }
+
+    const drawnX = new Set(), drawnY = new Set();
+    for (const pt of pts) {
+      const kx = Math.round(pt.x / TOL);
+      const ky = Math.round(pt.y / TOL);
+
+      // Guia vertical (alinha em X)
+      if (Math.abs(pt.x - x2) < TOL && Math.abs(pt.y - y2) > TOL * 3 && !drawnX.has(kx)) {
+        drawnX.add(kx);
+        ctx.strokeStyle = 'rgba(201,168,76,0.55)';
+        ctx.setLineDash([60 / this.zoom, 30 / this.zoom]);
+        ctx.beginPath();
+        ctx.moveTo(pt.x, oy);
+        ctx.lineTo(pt.x, oy + H);
+        ctx.stroke();
+        // Label de alinhamento
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(201,168,76,0.7)';
+        ctx.font = `500 ${11 / this.zoom}px Inter,sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('↕', pt.x, y2 - 20 / this.zoom);
+      }
+
+      // Guia horizontal (alinha em Y)
+      if (Math.abs(pt.y - y2) < TOL && Math.abs(pt.x - x2) > TOL * 3 && !drawnY.has(ky)) {
+        drawnY.add(ky);
+        ctx.strokeStyle = 'rgba(201,168,76,0.55)';
+        ctx.setLineDash([60 / this.zoom, 30 / this.zoom]);
+        ctx.beginPath();
+        ctx.moveTo(ox,     pt.y);
+        ctx.lineTo(ox + W, pt.y);
+        ctx.stroke();
+        // Label de alinhamento
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(201,168,76,0.7)';
+        ctx.font = `500 ${11 / this.zoom}px Inter,sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('↔', x2 + 20 / this.zoom, pt.y);
       }
     }
 
