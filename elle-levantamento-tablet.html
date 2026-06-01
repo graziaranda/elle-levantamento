@@ -2118,7 +2118,7 @@ const DxfWriter = {
         const area = polygonArea(env.polygon);
         if (area > 0) {
           const areaM2 = (area / 1e6).toFixed(2);
-          this._text(L, 'AMBIENTES', cen.x, cen.y - 350, `${areaM2}m²`, 180);
+          this._text(L, 'AMBIENTES', cen.x, cen.y - 350, `${areaM2}m2`, 180);
         }
         if (env.peDireito) {
           this._text(L, 'AMBIENTES', cen.x, cen.y - 700, `pd=${env.peDireito}m`, 140);
