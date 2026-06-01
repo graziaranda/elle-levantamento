@@ -2370,6 +2370,7 @@ const CanvasEditor = {
   _aimClosing: false,  // mira está fechando no 1º ponto
   _snapBadge:  null,   // string do ângulo travado exibida no preview (C-07)
   _archSnapPt: null,   // ponto arquitetônico capturado pelo snap magnético de cota
+  _wallSnapPt: null,   // endpoint de parede capturado pelo snap magnético de parede
 
   // Inserção de porta/janela arrastando até a parede
   _placingOpening: null,  // { type, wallId, position, cx, cy } | null
@@ -2685,6 +2686,7 @@ const CanvasEditor = {
     this._aimingInstall  = false;
     this._installPreview = null;
     this._archSnapPt     = null;
+    this._wallSnapPt     = null;
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -2775,6 +2777,56 @@ const CanvasEditor = {
     return { x, y, snapped: false };
   },
 
+  // ── Snap magnético para endpoints de parede ──────────────────────────────
+  // Usado quando o usuário está prestes a marcar o início de uma nova parede.
+  // Raio grande (24px) para uso com o dedo — evita paredes duplicadas no mesmo ponto.
+  _snapToWallEndpoint(rawWorld) {
+    const R = 24 / this.zoom;
+    let best = null, bestD = Infinity;
+    for (const w of this.project.canvas.walls) {
+      for (const pt of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
+        const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
+        if (d < R && d < bestD) { bestD = d; best = { x: pt.x, y: pt.y }; }
+      }
+    }
+    return best;
+  },
+
+  // Indicador visual do snap de endpoint: círculo verde + ímã
+  _drawWallSnap(ctx) {
+    const pt = this._wallSnapPt;
+    if (!pt) return;
+    const r = 16 / this.zoom;
+
+    // Halo externo
+    ctx.strokeStyle = 'rgba(90,154,112,0.5)';
+    ctx.lineWidth   = 1.5 / this.zoom;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r * 1.7, 0, Math.PI * 2); ctx.stroke();
+
+    // Anel sólido
+    ctx.strokeStyle = '#5A9A70';
+    ctx.lineWidth   = 2.5 / this.zoom;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2); ctx.stroke();
+
+    // Cruz interna
+    const c = r * 0.5;
+    ctx.strokeStyle = '#5A9A70';
+    ctx.lineWidth   = 2 / this.zoom;
+    ctx.beginPath();
+    ctx.moveTo(pt.x - c, pt.y); ctx.lineTo(pt.x + c, pt.y);
+    ctx.moveTo(pt.x, pt.y - c); ctx.lineTo(pt.x, pt.y + c);
+    ctx.stroke();
+
+    // Label "Conectar"
+    const fs = 11 / this.zoom;
+    ctx.font = `600 ${fs}px Inter,sans-serif`;
+    ctx.fillStyle = '#5A9A70';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('Conectar', pt.x, pt.y - r - 3 / this.zoom);
+    ctx.textBaseline = 'alphabetic';
+  },
+
   // ── Snap magnético para cotas ─────────────────────────────────────────────
   // Captura pontos estratégicos do levantamento com raio generoso (20px).
   // Pontos capturados: cantos de parede, meios de parede, bordas de vão,
@@ -2858,6 +2910,7 @@ const CanvasEditor = {
     if (this._placingInstall) this._layer('alvo-install',  () => this._drawInstallPlacement(ctx));
     if (this._installPreview) this._layer('previa-install', () => this._drawInstallPreview(ctx));
     if (this._archSnapPt)     this._layer('snap-arch',      () => this._drawArchSnap(ctx));
+    if (this._wallSnapPt)     this._layer('snap-wall',      () => this._drawWallSnap(ctx));
     if (this.drawStart) this._layer('preview', () => this._drawPreview(ctx));
     if (this.currentTool === 'environment') this._layer('preview-amb', () => this._drawEnvPreview(ctx));
 
@@ -3535,10 +3588,16 @@ const CanvasEditor = {
 
     if (this._handleScaleCalibClick(world)) return;
 
-    // Parede: clica para fixar o início; depois arrasta para mirar
+    // Parede: clica para fixar o início (snap magnético a endpoint existente)
     if (this.currentTool === 'wall') {
-      if (!this.drawStart) this._wallSetAnchor(world);
-      else { this._aiming = true; this._wallAim(raw); }
+      if (!this.drawStart) {
+        // Aplicar snap de endpoint se disponível — impede paredes duplicadas
+        const snapped = this._snapToWallEndpoint(raw);
+        this._wallSnapPt = null;  // limpa indicador ao confirmar
+        this._wallSetAnchor(snapped || world);
+      } else {
+        this._aiming = true; this._wallAim(raw);
+      }
       return;
     }
 
@@ -3581,12 +3640,19 @@ const CanvasEditor = {
 
     this.mouseWorld = this._snapWorld(raw, e.shiftKey);
 
-    // Snap magnético de cota: atualiza indicador em tempo real
+    // Snap magnético de cota: indicador em tempo real
     if (this.currentTool === 'dimension') {
       this._archSnapPt = this._snapToArchPoint(raw);
+      this._wallSnapPt = null;
       if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
+    // Snap magnético de parede: mostra ímã verde ao se aproximar de endpoint
+    } else if (this.currentTool === 'wall' && !this.drawStart) {
+      this._wallSnapPt = this._snapToWallEndpoint(raw);
+      this._archSnapPt = null;
+      if (this._wallSnapPt) this.mouseWorld = this._wallSnapPt;
     } else {
       this._archSnapPt = null;
+      this._wallSnapPt = null;
     }
 
     this._draw();
@@ -5293,9 +5359,15 @@ const CanvasEditor = {
       // Snap magnético de cota no touch move
       if (this.currentTool === 'dimension') {
         this._archSnapPt = this._snapToArchPoint(raw);
+        this._wallSnapPt = null;
         if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
+      } else if (this.currentTool === 'wall' && !this.drawStart) {
+        this._wallSnapPt = this._snapToWallEndpoint(raw);
+        this._archSnapPt = null;
+        if (this._wallSnapPt) this.mouseWorld = this._wallSnapPt;
       } else {
         this._archSnapPt = null;
+        this._wallSnapPt = null;
       }
 
       // Selecionar: arrasto com 1 dedo move o mapa
