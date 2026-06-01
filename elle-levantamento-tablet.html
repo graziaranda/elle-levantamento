@@ -2072,14 +2072,25 @@ const DxfWriter = {
       return [...left,...[...right].reverse()];
     };
 
-    // Desenha cada cadeia como polígono fechado (LINE entities)
+    // Desenha cada cadeia como polígono (LINE entities)
+    // T-junctions: não desenha tampas (end caps) onde 3+ paredes se encontram
     for (const chain of chains) {
       const { pts, t } = chain;
       const p0=pts[0], pN=pts[pts.length-1];
       const closed = Math.sqrt((pN.x-p0.x)**2+(pN.y-p0.y)**2) < 25;
       if (pts.length < 2) continue;
-      const poly = chainPoly(pts, t, closed);
+      const poly   = chainPoly(pts, t, closed);
+      const ns     = pts.length - 1;
+
+      // Extremidades que são T-junction: não desenha a tampa nesse lado
+      const startIsT = !closed && (endMap.get(epKey(p0.x, p0.y))||[]).length >= 3;
+      const endIsT   = !closed && (endMap.get(epKey(pN.x, pN.y))||[]).length >= 3;
+      // Tampa do FIM = aresta poly[ns] → poly[ns+1]   (índice i=ns)
+      // Tampa do INÍCIO = aresta poly[2ns+1] → poly[0] (índice i=2*ns+1)
+
       for (let i = 0; i < poly.length; i++) {
+        if (!closed && endIsT   && i === ns)         continue; // pula tampa do fim
+        if (!closed && startIsT && i === 2 * ns + 1) continue; // pula tampa do início
         const a=poly[i], b=poly[(i+1)%poly.length];
         if (Math.sqrt((b.x-a.x)**2+(b.y-a.y)**2) < 1) continue;
         this._line(L, 'PAREDES', a.x, a.y, b.x, b.y);
@@ -2454,6 +2465,7 @@ const CanvasEditor = {
   _snapBadge:  null,   // string do ângulo travado exibida no preview (C-07)
   _archSnapPt: null,   // ponto arquitetônico capturado pelo snap magnético de cota
   _wallSnapPt: null,   // endpoint de parede capturado pelo snap magnético de parede
+  _trackSnap:  null,   // tracking snap ativo (alinhamento H/V com endpoint existente)
 
   // Inserção de porta/janela arrastando até a parede
   _placingOpening: null,  // { type, wallId, position, cx, cy } | null
@@ -2770,6 +2782,7 @@ const CanvasEditor = {
     this._installPreview = null;
     this._archSnapPt     = null;
     this._wallSnapPt     = null;
+    this._trackSnap      = null;
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -3739,6 +3752,20 @@ const CanvasEditor = {
     }
 
     ctx.setLineDash([]);
+
+    // Marcador de tracking snap: quadrado verde no endpoint de origem
+    if (this._trackSnap) {
+      const src = this._trackSnap.src;
+      const sq = 8 / this.zoom;
+      ctx.strokeStyle = '#5A9A70';
+      ctx.lineWidth   = 2 / this.zoom;
+      ctx.fillStyle   = 'rgba(90,154,112,0.2)';
+      ctx.beginPath();
+      ctx.rect(src.x - sq, src.y - sq, sq * 2, sq * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
     ctx.restore();
   },
 
@@ -4149,10 +4176,51 @@ const CanvasEditor = {
     const len    = dist(a.x, a.y, rawWorld.x, rawWorld.y);
     this._aimAngle  = ang;
     this.mouseWorld = { x: a.x + Math.cos(ang) * len, y: a.y + Math.sin(ang) * len };
-    // Badge de ângulo travado — C-07
-    const snapped = ang !== rawAng;
-    this._snapBadge = snapped ? this._angleLabel(ang) : null;
+
+    // Object Snap Tracking: snap ao alinhamento H/V com endpoints existentes
+    const tracked = this._snapToTracking(a, this.mouseWorld);
+    if (tracked) {
+      this.mouseWorld  = tracked.pt;
+      this._aimAngle   = Math.atan2(tracked.pt.y - a.y, tracked.pt.x - a.x);
+      this._trackSnap  = tracked;
+      this._snapBadge  = null; // tracking sobrepõe badge de ângulo
+    } else {
+      this._trackSnap  = null;
+      // Badge de ângulo travado — C-07
+      const snapped = ang !== rawAng;
+      this._snapBadge = snapped ? this._angleLabel(ang) : null;
+    }
     this._draw();
+  },
+
+  // Object Snap Tracking: alinha cursor H ou V com endpoints de paredes existentes.
+  // Retorna { pt, src, dir } ou null.
+  _snapToTracking(start, current) {
+    const TOL  = 14 / this.zoom; // tolerância de alinhamento (px na tela)
+    const RMIN = 50 / this.zoom; // ignora endpoints muito perto do ponto de início
+    const walls = this.project.canvas.walls;
+
+    let best = null, bestDist = TOL;
+    for (const w of walls) {
+      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
+        // Ignora o próprio ponto de início
+        if (dist(px, py, start.x, start.y) < RMIN) continue;
+
+        // Alinhamento vertical (mesmo X → cursor trava em px)
+        const dx = Math.abs(current.x - px);
+        if (dx < bestDist) {
+          bestDist = dx;
+          best = { pt: { x: px, y: current.y }, src: { x: px, y: py }, dir: 'V' };
+        }
+        // Alinhamento horizontal (mesmo Y → cursor trava em py)
+        const dy = Math.abs(current.y - py);
+        if (dy < bestDist) {
+          bestDist = dy;
+          best = { pt: { x: current.x, y: py }, src: { x: px, y: py }, dir: 'H' };
+        }
+      }
+    }
+    return best;
   },
 
   // Solta o arraste → pede o comprimento
