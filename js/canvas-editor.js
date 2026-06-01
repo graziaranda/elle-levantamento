@@ -518,47 +518,27 @@ const CanvasEditor = {
     const c  = this.project.canvas;
     const candidates = [];
 
-    // ── Faces de parede via projeção perpendicular ──────────────────────────
-    // Para cada parede projeta o cursor perpendicularmente sobre o eixo da
-    // parede. O snap só ativa se o cursor cair DENTRO do comprimento da parede
-    // e dentro do raio R da face. Resultado: a cruz sempre aparece SOBRE a
-    // parede (nunca flutuando no vazio).
+    // Snap apenas nos CANTOS das paredes (extremidades), projetado para a face
+    // mais próxima do cursor. Nunca desliza ao longo da parede.
     for (const w of c.walls) {
-      const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx*dx + dy*dy);
       if (!len) continue;
-      const ux = dx / len, uy = dy / len;   // unitário ao longo da parede
-      const nx = -uy,       ny = ux;         // normal perpendicular
-      const t  = (w.thickness || 150) / 2;  // metade da espessura
+      const nx = -dy / len, ny = dx / len;
+      const t  = (w.thickness || 150) / 2;
 
-      // Projeção do cursor sobre o eixo da parede
-      const rx = rawWorld.x - w.x1, ry = rawWorld.y - w.y1;
-      const along = rx * ux + ry * uy; // distância ao longo da parede
-      const perp  = rx * nx + ry * ny; // distância perpendicular ao eixo
+      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
+        const toX = rawWorld.x - px, toY = rawWorld.y - py;
+        const onNSide = nx * toX + ny * toY;
+        const sign = onNSide >= 0 ? 1 : -1;
 
-      // Cursor mais longe que R de ambas as faces → ignora
-      if (Math.abs(perp) > t + R) continue;
+        const snapX = px + sign * nx * t;
+        const snapY = py + sign * ny * t;
 
-      // Clampear ao comprimento da parede — permite snap nos cantos/extremidades
-      const clAlong = Math.max(0, Math.min(len, along));
-      const projX = w.x1 + ux * clAlong;
-      const projY = w.y1 + uy * clAlong;
-
-      // Face do lado do cursor (determina por sinal da projeção perp)
-      const sign = perp >= 0 ? 1 : -1;
-      const fx   = sign * nx * t, fy = sign * ny * t;
-
-      // Snap point: ponto projetado deslocado para a face
-      const snapX = projX + fx;
-      const snapY = projY + fy;
-
-      const d = dist(rawWorld.x, rawWorld.y, snapX, snapY);
-      if (d < R) {
-        candidates.push({
-          x: snapX, y: snapY,
-          priority: 1,
-          faceSeg: { x1: w.x1 + fx, y1: w.y1 + fy, x2: w.x2 + fx, y2: w.y2 + fy },
-        });
+        const d = dist(rawWorld.x, rawWorld.y, snapX, snapY);
+        if (d < R) {
+          candidates.push({ x: snapX, y: snapY, priority: 1 });
+        }
       }
     }
 
@@ -1884,32 +1864,33 @@ const CanvasEditor = {
   _drawArchSnap(ctx) {
     const pt = this._archSnapPt;
     if (!pt) return;
-    const r = 14 / this.zoom;
+    const r = 10 / this.zoom;
 
-    // Linha da face destacada — ciano sobre a parede para mostrar QUAL face
-    if (pt.faceSeg) {
-      const s = pt.faceSeg;
-      ctx.save();
-      ctx.strokeStyle = '#00C8FF';
-      ctx.lineWidth   = 3.5 / this.zoom;
-      ctx.setLineDash([]);
-      ctx.beginPath();
-      ctx.moveTo(s.x1, s.y1);
-      ctx.lineTo(s.x2, s.y2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Círculo + cruz no ponto exato da face
-    ctx.strokeStyle = '#00C8FF';
-    ctx.lineWidth   = 2 / this.zoom;
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2); ctx.stroke();
-
-    ctx.lineWidth = 2.5 / this.zoom;
-    ctx.beginPath();
-    ctx.moveTo(pt.x - r * 0.7, pt.y); ctx.lineTo(pt.x + r * 0.7, pt.y);
-    ctx.moveTo(pt.x, pt.y - r * 0.7); ctx.lineTo(pt.x, pt.y + r * 0.7);
+    // Ponto preenchido dourado + anel — discreto e alinhado com a cor das cotas
+    ctx.fillStyle   = '#C9A84C';
+    ctx.strokeStyle = 'rgba(201,168,76,0.4)';
+    ctx.lineWidth   = 6 / this.zoom;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
+
+    if (pt.label) {
+      const fs  = 11 / this.zoom;
+      const pad = 4  / this.zoom;
+      ctx.font = `700 ${fs}px Inter,sans-serif`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'bottom';
+      const tw = ctx.measureText(pt.label).width;
+      const bx = pt.x - tw / 2 - pad;
+      const by = pt.y - r * 2 - fs - pad;
+      ctx.fillStyle = 'rgba(0,0,0,0.88)';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
+      ctx.fill();
+      ctx.fillStyle = '#C9A84C';
+      ctx.fillText(pt.label, pt.x, by + fs + pad * 0.75);
+      ctx.textBaseline = 'alphabetic';
+    }
   },
 
   // Garante que o offset da cota sempre vai para o EXTERIOR do desenho.
