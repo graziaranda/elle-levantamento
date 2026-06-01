@@ -1244,14 +1244,16 @@ const CanvasEditor = {
     // Movimento mínimo: ignora toque parado (precisa de uma direção)
     if (!closing && measured * this.zoom < 12) { this.mouseWorld = a; this._draw(); return; }
 
-    const cmDefault = Math.round(measured / 10);
+    // Sugestão em metros com 2 casas decimais (ex: "3,20")
+    const mDefault = measured > 0 ? (measured / 1000).toFixed(2).replace('.', ',') : '';
 
     this._numpad({
-      title: closing ? 'Fechar ambiente — comprimento (cm)' : 'Comprimento da parede (cm)',
+      title: closing ? 'Fechar ambiente — comprimento (m)' : 'Comprimento da parede (m)',
       hint:  closing ? 'Esta parede fecha o contorno do ambiente'
                      : 'Direção travada. Digite a medida da trena.',
-      value: cmDefault > 0 ? cmDefault : '',
-      onOk:  cm => this._addWallSegment(a, dirX, dirY, cm * 10, closing),
+      unit:  'm',
+      value: mDefault,
+      onOk:  m => this._addWallSegment(a, dirX, dirY, m * 1000, closing),
       onCancel: () => { this.mouseWorld = a; this._draw(); },
     });
   },
@@ -1302,11 +1304,13 @@ const CanvasEditor = {
     this._showHint('Toque para marcar o início da parede');
   },
 
-  // ── Teclado numérico (cm) reutilizável ──
-  // value = sugestão (medida do arraste). O primeiro toque substitui a sugestão.
-  _numpad({ title, hint, value, unit = 'cm', onOk, onCancel }) {
+  // ── Teclado numérico reutilizável ──
+  // Aceita toque nos botões E teclado físico (PC/tablet com teclado).
+  // value = sugestão (ex: "3,20"). O primeiro toque/tecla substitui a sugestão.
+  // unit  = unidade exibida (padrão: 'm')
+  _numpad({ title, hint, value, unit = 'm', onOk, onCancel }) {
     let buf   = (value !== undefined && value !== null && value !== '') ? String(value) : '';
-    let fresh = buf !== '';   // veio sugestão → 1ª tecla começa do zero
+    let fresh = buf !== '';   // veio sugestão → 1ª interação começa do zero
 
     Modal.open(`
       <div class="numpad">
@@ -1318,7 +1322,7 @@ const CanvasEditor = {
         </div>
         <div class="numpad-grid">
           ${[7,8,9,4,5,6,1,2,3].map(n => `<button class="np-key" data-k="${n}">${n}</button>`).join('')}
-          <button class="np-key np-dec" data-k=",">.</button>
+          <button class="np-key np-dec" data-k=",">,</button>
           <button class="np-key" data-k="0">0</button>
           <button class="np-key np-back" data-k="back">⌫</button>
         </div>
@@ -1333,26 +1337,41 @@ const CanvasEditor = {
       const el = document.getElementById('np-val');
       if (el) { el.textContent = buf || '0'; el.classList.toggle('np-suggest', fresh); }
     };
-    document.querySelectorAll('.np-key').forEach(b => b.addEventListener('click', () => {
-      const k = b.dataset.k;
+
+    const press = k => {
       if (k === 'back')  { if (fresh) { buf = ''; fresh = false; } else buf = buf.slice(0, -1); }
-      else if (k === ',') {
-        // Tecla decimal: insere vírgula apenas se ainda não tiver separador
+      else if (k === ',' || k === '.') {
         if (fresh) { buf = '0'; fresh = false; }
         if (!buf.includes(',') && !buf.includes('.')) buf += ',';
       }
-      else { if (fresh) { buf = ''; fresh = false; } buf += k; }
+      else if (/^[0-9]$/.test(k)) { if (fresh) { buf = ''; fresh = false; } buf += k; }
       refresh();
-    }));
+    };
+
+    document.querySelectorAll('.np-key').forEach(b =>
+      b.addEventListener('click', () => press(b.dataset.k))
+    );
+
+    // Suporte a teclado físico — funciona no PC e em tablet com teclado bluetooth
+    const keyHandler = e => {
+      if (['INPUT','TEXTAREA'].includes(e.target?.tagName)) return;
+      if (/^[0-9]$/.test(e.key))            { e.preventDefault(); press(e.key); }
+      else if (e.key === '.' || e.key === ',') { e.preventDefault(); press(','); }
+      else if (e.key === 'Backspace')          { e.preventDefault(); press('back'); }
+      else if (e.key === 'Enter')              { e.preventDefault(); document.getElementById('np-ok')?.click(); }
+      else if (e.key === 'Escape')             { e.preventDefault(); document.getElementById('np-cancel')?.click(); }
+    };
+    document.addEventListener('keydown', keyHandler);
+
+    const cleanup = () => document.removeEventListener('keydown', keyHandler);
+
     document.getElementById('np-cancel').addEventListener('click', () => {
-      Modal.close();
-      if (onCancel) onCancel();
+      cleanup(); Modal.close(); if (onCancel) onCancel();
     });
     document.getElementById('np-ok').addEventListener('click', () => {
-      const num = parseFloat(buf.replace(',', '.'));
-      if (isNaN(num) || num <= 0) { Toast.show('Digite um valor válido', 'error'); return; }
-      Modal.close();
-      onOk(num);
+      const num = parseLocaleFloat(buf);
+      if (!num || num <= 0) { Toast.show('Digite um valor válido', 'error'); return; }
+      cleanup(); Modal.close(); onOk(num);
     });
   },
 
