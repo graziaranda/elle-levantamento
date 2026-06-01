@@ -2701,7 +2701,7 @@ const CanvasEditor = {
       dimension:   'Toque no 1º ponto da cota · 2º toque finaliza a medida',
       door:        'Arraste até a parede onde fica a porta e solte (a parede acende)',
       window:      'Arraste até a parede onde fica a janela e solte (a parede acende)',
-      install:     'Toque na planta para posicionar ponto de instalação',
+      install:     'Arraste até parede → modo parede · Toque no piso (centro do ambiente) → modo piso (X + Y)',
       photo:       'Toque na planta para tirar/vincular uma foto',
       note:        'Toque na planta para adicionar nota de texto',
       environment: 'Toque nos cantos do ambiente · Toque "Fechar" para concluir',
@@ -4557,7 +4557,9 @@ const CanvasEditor = {
       const { t, d } = projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
       if (d < bestDist && t >= 0 && t <= 1) { bestDist = d; bestWall = w; bestT = t; }
     }
-    if (bestWall && bestDist <= 700 / this.zoom) {
+    // Threshold FIXO em mm (não depende do zoom): dentro de 500mm = modo parede
+    // Garante que tocar no piso longe de paredes sempre ativa modo piso
+    if (bestWall && bestDist <= 500) {
       const wl  = dist(bestWall.x1, bestWall.y1, bestWall.x2, bestWall.y2);
       const dS  = dist(rawWorld.x, rawWorld.y, bestWall.x1, bestWall.y1);
       const dE  = dist(rawWorld.x, rawWorld.y, bestWall.x2, bestWall.y2);
