@@ -2064,17 +2064,33 @@ const DxfWriter = {
   },
 
   // ── Dimensões (cotas) ─────────────────────────
-  // Gera entidade DIMENSION nativa (AC1015 = AutoCAD R2000).
-  // A entidade referencia um bloco anônimo *Dn que contém a geometria visual
-  // como fallback para viewers que não processam DIMENSION nativamente.
-
+  // Cotas como LINE + TEXT simples — compatível com qualquer leitor DXF.
   _writeDimensions(L, c) {
-    const dims = c.dimensions || [];
-    for (let i = 0; i < dims.length; i++) {
-      const d = dims[i];
-      const measuredMm = Math.sqrt((d.x2 - d.x1) ** 2 + (d.y2 - d.y1) ** 2);
+    for (const d of (c.dimensions || [])) {
+      const dx = d.x2 - d.x1, dy = d.y2 - d.y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (!len) continue;
+      const measuredMm = len;
       const val = (d.value != null) ? d.value : Math.round(measuredMm);
-      this._dimEntity(L, d, val, i + 1);
+      const nx = dx / len, ny = dy / len;
+      const perp = { x: -ny, y: nx };
+      const off  = d.offset || 400;
+      const p1   = { x: d.x1 + perp.x * off, y: d.y1 + perp.y * off };
+      const p2   = { x: d.x2 + perp.x * off, y: d.y2 + perp.y * off };
+      const mx   = (p1.x + p2.x) / 2;
+      const my   = (p1.y + p2.y) / 2;
+      const tick = 80;
+      // Linha de cota + extensões + ticks
+      this._line(L, 'COTAS', p1.x, p1.y, p2.x, p2.y);
+      this._line(L, 'COTAS', d.x1, d.y1, p1.x, p1.y);
+      this._line(L, 'COTAS', d.x2, d.y2, p2.x, p2.y);
+      for (const pt of [p1, p2]) {
+        this._line(L, 'COTAS',
+          pt.x - nx * tick, pt.y - ny * tick,
+          pt.x + nx * tick, pt.y + ny * tick);
+      }
+      // Texto
+      this._text(L, 'COTAS', mx, my + 120, fmtMm(val), 200);
     }
   },
 
@@ -2239,29 +2255,17 @@ const DxfWriter = {
   // Viewers que não processam a entidade DIMENSION usam o bloco como fallback.
   _blocks(L, c) {
     L.push('0', 'SECTION', '2', 'BLOCKS');
-
-    // Bloco MODEL_SPACE obrigatório em AC1015
+    // Blocos obrigatórios em AC1015
     L.push(
-      '0', 'BLOCK', '2', '*Model_Space', '70', '0',
-      '10', '0', '20', '0', '30', '0', '3', '', '1', '',
-      '0', 'ENDBLK'
+      '0', 'BLOCK', '8', '0', '2', '*Model_Space', '70', '0',
+      '10', '0', '20', '0', '30', '0', '3', '*Model_Space', '1', '',
+      '0', 'ENDBLK', '8', '0'
     );
     L.push(
-      '0', 'BLOCK', '2', '*Paper_Space', '70', '0',
-      '10', '0', '20', '0', '30', '0', '3', '', '1', '',
-      '0', 'ENDBLK'
+      '0', 'BLOCK', '8', '0', '2', '*Paper_Space', '70', '0',
+      '10', '0', '20', '0', '30', '0', '3', '*Paper_Space', '1', '',
+      '0', 'ENDBLK', '8', '0'
     );
-
-    // Um bloco por cota
-    const dims = c.dimensions || [];
-    for (let i = 0; i < dims.length; i++) {
-      const d = dims[i];
-      const n = i + 1;
-      const measuredMm = Math.sqrt((d.x2 - d.x1) ** 2 + (d.y2 - d.y1) ** 2);
-      const val = (d.value != null) ? d.value : Math.round(measuredMm);
-      this._dimBlock(L, d, val, n);
-    }
-
     L.push('0', 'ENDSEC');
   },
 
