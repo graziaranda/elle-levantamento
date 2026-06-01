@@ -564,12 +564,11 @@ const CanvasEditor = {
   _drawWalls(ctx) {
     const walls = this.project.canvas.walls;
 
-    // ── Corpo das paredes: retângulo preenchido rotacionado ──
-    // Elimina todos os artefatos de lineCap (chanfros, bumps diagonais).
-    // Retângulos sobrepostos da mesma cor fundem visualmente — cantos limpos.
+    // ── Passo 1: corpo das paredes como fillRect rotacionado ──
+    // Sem lineCap — sem extensão além dos endpoints — sem bumps diagonais.
     for (const w of walls) {
       const sel = this.selected?.id === w.id;
-      const thickness = w.thickness || 150;
+      const t   = w.thickness || 150;
       const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
       if (!len) continue;
@@ -578,23 +577,56 @@ const CanvasEditor = {
       ctx.save();
       ctx.translate(w.x1, w.y1);
       ctx.rotate(Math.atan2(dy, dx));
-      ctx.fillRect(0, -thickness / 2, len, thickness);
+      ctx.fillRect(0, -t / 2, len, t);
       ctx.restore();
     }
 
-    // ── Labels de comprimento ──
-    // Aparecem sempre que a parede tiver ≥ 80px na tela (legível).
+    // ── Passo 2: quadrado nos endpoints compartilhados ──
+    // Quando duas paredes se encontram num endpoint, a fillRect de cada uma
+    // não cobre o "canto externo" — falta um triângulo de ~(t/2)×(t/2).
+    // Um quadrado t×t centrado no endpoint cobre esse gap em qualquer ângulo.
+    const epMap = new Map();
+    const epKey = (x, y) => `${Math.round(x / 10)},${Math.round(y / 10)}`; // 10mm de tolerância
+
+    for (const w of walls) {
+      const t = w.thickness || 150;
+      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
+        const k = epKey(px, py);
+        if (!epMap.has(k)) epMap.set(k, { x: px, y: py, t, count: 0 });
+        const ep = epMap.get(k);
+        ep.count++;
+        if (t > ep.t) ep.t = t;
+      }
+    }
+    // Disco preenchido no endpoint: cobre o gap em QUALQUER ângulo de junção.
+    // Um fillRect (quadrado) só funciona para 90°; o círculo garante cobertura
+    // para diagonais (45°, 30°, qualquer ângulo) sem criar bump visível.
+    ctx.fillStyle = '#F0EBE0';
+    for (const ep of epMap.values()) {
+      if (ep.count < 2) continue;
+      ctx.beginPath();
+      ctx.arc(ep.x, ep.y, ep.t / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // ── Passo 3: labels de comprimento ──
+    // Sempre visíveis quando a parede ≥ 80px na tela.
+    // Ângulo normalizado: texto nunca aparece de cabeça para baixo.
     for (const w of walls) {
       const sel = this.selected?.id === w.id;
       const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
-      const lenScreen = len * this.zoom;
-      if (!sel && lenScreen < 80) continue;
+      if (!sel && len * this.zoom < 80) continue;
 
       const mx  = (w.x1 + w.x2) / 2;
       const my  = (w.y1 + w.y2) / 2;
-      const ang = Math.atan2(dy, dx);
-      const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+      // Normaliza o ângulo para o texto sempre ler da esquerda para a direita
+      let ang = Math.atan2(dy, dx);
+      if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+
+      const label = len >= 1000
+        ? `${(len / 1000).toFixed(2)}m`
+        : `${Math.round(len)}mm`;
 
       ctx.save();
       ctx.translate(mx, my);
@@ -603,7 +635,6 @@ const CanvasEditor = {
       ctx.font = `500 ${fs}px Inter,sans-serif`;
       ctx.textAlign = 'center';
       const tw = ctx.measureText(label).width;
-      // Fundo do label
       ctx.fillStyle = '#1A1814';
       ctx.fillRect(-tw / 2 - 4 / this.zoom, -fs - 11 / this.zoom, tw + 8 / this.zoom, fs + 5 / this.zoom);
       ctx.fillStyle = sel ? 'rgba(201,168,76,0.95)' : 'rgba(200,184,150,0.85)';
