@@ -1994,90 +1994,96 @@ const DxfWriter = {
   _writeWalls(L, c) {
     const walls    = c.walls    || [];
     const openings = c.openings || [];
-    const SNAP     = 20;
+    if (!walls.length) return;
 
-    // Interseção de duas linhas: p1+t*d1 = p2+s*d2
-    const lineIsect = (p1, d1, p2, d2) => {
-      const cross = d1.x*d2.y - d1.y*d2.x;
-      if (Math.abs(cross) < 0.001) return null;
-      const t2 = ((p2.x-p1.x)*d2.y - (p2.y-p1.y)*d2.x) / cross;
-      return { x: p1.x + t2*d1.x, y: p1.y + t2*d1.y };
-    };
+    const SNAP = 20;
+    const epKey = (x, y) => `${Math.round(x/SNAP)},${Math.round(y/SNAP)}`;
 
-    // Parede conectada num endpoint
-    const getConn = (w, px, py) =>
-      walls.find(o => o !== w && (
-        (Math.abs(o.x1-px) < SNAP && Math.abs(o.y1-py) < SNAP) ||
-        (Math.abs(o.x2-px) < SNAP && Math.abs(o.y2-py) < SNAP)
-      ));
+    // Constrói cadeias de paredes conectadas (idêntico ao canvas editor)
+    const endMap = new Map();
+    for (const w of walls) {
+      for (const [px, py, end] of [[w.x1,w.y1,'1'],[w.x2,w.y2,'2']]) {
+        const k = epKey(px, py);
+        if (!endMap.has(k)) endMap.set(k, []);
+        endMap.get(k).push({ wid: w.id, end });
+      }
+    }
+    const used = new Set();
+    const chains = [];
+    const wallById = id => walls.find(w => w.id === id);
 
-    // Ponto de miter: interseção das faces das duas paredes num canto.
-    // thisDir = direção unitária desta parede (de x1 para x2, sempre).
-    // sign +1 = face esquerda, -1 = face direita (em relação à direção da parede).
-    const miterPt = (px, py, thisDir, connW, sign, h) => {
-      // Ponto simples na face desta parede neste endpoint
-      const ptFace = { x: px + (-thisDir.y)*sign*h, y: py + thisDir.x*sign*h };
-      if (!connW) return ptFace; // extremidade livre: sem miter
-
-      // Direção da parede conectada, saindo deste ponto
-      const atX1 = Math.abs(connW.x1-px) < SNAP && Math.abs(connW.y1-py) < SNAP;
-      const cdx  = atX1 ? connW.x2-connW.x1 : connW.x1-connW.x2;
-      const cdy  = atX1 ? connW.y2-connW.y1 : connW.y1-connW.y2;
-      const cl   = Math.sqrt(cdx*cdx + cdy*cdy);
-      if (!cl) return ptFace;
-      const cDir = { x: cdx/cl, y: cdy/cl };
-
-      // Ponto na face da parede conectada
-      const ptConn = { x: px + (-cDir.y)*sign*h, y: py + cDir.x*sign*h };
-
-      // Interseção das duas faces → ponto de miter
-      const isect = lineIsect(ptFace, thisDir, ptConn, cDir);
-      if (!isect) return ptFace;
-
-      // Rejeita miters extremos (ângulos muito fechados)
-      const d = Math.sqrt((isect.x-px)**2 + (isect.y-py)**2);
-      return d < h * 8 ? isect : ptFace;
+    const followChain = (startWall, startEnd) => {
+      const pts = []; let w = startWall, end = startEnd;
+      while (w && !used.has(w.id)) {
+        used.add(w.id);
+        const [px,py] = end==='1' ? [w.x1,w.y1] : [w.x2,w.y2];
+        pts.push({ x: px, y: py, wid: w.id });
+        const [ox,oy] = end==='1' ? [w.x2,w.y2] : [w.x1,w.y1];
+        pts.push({ x: ox, y: oy, wid: null });
+        const nexts = (endMap.get(epKey(ox,oy))||[]).filter(e=>e.wid!==w.id&&!used.has(e.wid));
+        if (nexts.length===1) { const nxt=wallById(nexts[0].wid); end=nexts[0].end; w=nxt; pts.pop(); }
+        else w=null;
+      }
+      return pts;
     };
 
     for (const w of walls) {
-      const h   = (w.thickness || 150) / 2;
-      const dx  = w.x2-w.x1, dy = w.y2-w.y1;
-      const len = Math.sqrt(dx*dx+dy*dy);
-      if (!len) continue;
-      const dir = { x: dx/len, y: dy/len };
+      if (used.has(w.id)) continue;
+      const k1=epKey(w.x1,w.y1);
+      const free1 = !(endMap.get(k1)||[]).some(e=>e.wid!==w.id);
+      const pts = followChain(w, free1?'1':'2');
+      if (pts.length >= 2) chains.push({ pts, t: w.thickness||150 });
+    }
 
-      const connS = getConn(w, w.x1, w.y1);
-      const connE = getConn(w, w.x2, w.y2);
-
-      const cuts = openings
-        .filter(o => o.wallId === w.id)
-        .map(o => ({ s: len*o.position-(o.width||900)/2, e: len*o.position+(o.width||900)/2 }))
-        .sort((a, b) => a.s - b.s);
-
-      const drawFace = (sign) => {
-        const ox = -dir.y*sign*h, oy = dir.x*sign*h;
-        const ptS = miterPt(w.x1, w.y1, dir, connS, sign, h);
-        const ptE = miterPt(w.x2, w.y2, dir, connE, sign, h);
-
-        let cur = 0, from = ptS;
-        for (const cut of cuts) {
-          const cs = Math.max(0, cut.s), ce = Math.min(len, cut.e);
-          if (cs > cur) {
-            const to = { x: w.x1+dir.x*cs+ox, y: w.y1+dir.y*cs+oy };
-            this._line(L, 'PAREDES', from.x, from.y, to.x, to.y);
-          }
-          cur  = ce;
-          from = { x: w.x1+dir.x*ce+ox, y: w.y1+dir.y*ce+oy };
-        }
-        this._line(L, 'PAREDES', from.x, from.y, ptE.x, ptE.y);
+    // chainPoly: mesma função do canvas editor — cantos corretos em qualquer ângulo
+    const lineIsect = (p1,d1,p2,d2) => {
+      const cr = d1.x*d2.y-d1.y*d2.x; if (Math.abs(cr)<0.001) return null;
+      const t2 = ((p2.x-p1.x)*d2.y-(p2.y-p1.y)*d2.x)/cr;
+      return { x:p1.x+t2*d1.x, y:p1.y+t2*d1.y };
+    };
+    const chainPoly = (pts, t, closed) => {
+      const n=pts.length, h=t/2, seg=[];
+      for (let i=0;i<n-1;i++) {
+        const dx=pts[i+1].x-pts[i].x, dy=pts[i+1].y-pts[i].y;
+        const l=Math.sqrt(dx*dx+dy*dy);
+        if (!l) { seg.push({nx:0,ny:0,dx:0,dy:0}); continue; }
+        seg.push({ nx:-dy/l, ny:dx/l, dx:dx/l, dy:dy/l });
+      }
+      const ns=seg.length;
+      const mpt = (i,s) => {
+        const pi=(i-1+ns)%ns, s1=seg[pi], s2=seg[i%ns], P=pts[i%pts.length];
+        if (!s1||!s2||(!s1.dx&&!s1.dy)||(!s2.dx&&!s2.dy))
+          return {x:P.x+s*(s2||s1).nx*h, y:P.y+s*(s2||s1).ny*h};
+        const p1={x:P.x+s*s1.nx*h,y:P.y+s*s1.ny*h}, p2={x:P.x+s*s2.nx*h,y:P.y+s*s2.ny*h};
+        const is=lineIsect(p1,{x:s1.dx,y:s1.dy},p2,{x:s2.dx,y:s2.dy});
+        if (!is) return p1;
+        return Math.sqrt((is.x-P.x)**2+(is.y-P.y)**2)<h*8?is:p1;
       };
+      const left=[],right=[];
+      for (let i=0;i<=ns;i++) {
+        if (i===0) {
+          if (closed){left.push(mpt(0,1));right.push(mpt(0,-1));}
+          else{left.push({x:pts[0].x+seg[0].nx*h,y:pts[0].y+seg[0].ny*h});right.push({x:pts[0].x-seg[0].nx*h,y:pts[0].y-seg[0].ny*h});}
+        } else if (i===ns) {
+          if (closed){left.push(left[0]);right.push(right[0]);}
+          else{const s=seg[ns-1],P=pts[ns];left.push({x:P.x+s.nx*h,y:P.y+s.ny*h});right.push({x:P.x-s.nx*h,y:P.y-s.ny*h});}
+        } else {left.push(mpt(i,1));right.push(mpt(i,-1));}
+      }
+      return [...left,...[...right].reverse()];
+    };
 
-      drawFace(+1);
-      drawFace(-1);
-
-      // Tampas só em extremidades livres
-      if (!connS) this._line(L,'PAREDES', w.x1-dir.y*h, w.y1+dir.x*h, w.x1+dir.y*h, w.y1-dir.x*h);
-      if (!connE) this._line(L,'PAREDES', w.x2-dir.y*h, w.y2+dir.x*h, w.x2+dir.y*h, w.y2-dir.x*h);
+    // Desenha cada cadeia como polígono fechado (LINE entities)
+    for (const chain of chains) {
+      const { pts, t } = chain;
+      const p0=pts[0], pN=pts[pts.length-1];
+      const closed = Math.sqrt((pN.x-p0.x)**2+(pN.y-p0.y)**2) < 25;
+      if (pts.length < 2) continue;
+      const poly = chainPoly(pts, t, closed);
+      for (let i = 0; i < poly.length; i++) {
+        const a=poly[i], b=poly[(i+1)%poly.length];
+        if (Math.sqrt((b.x-a.x)**2+(b.y-a.y)**2) < 1) continue;
+        this._line(L, 'PAREDES', a.x, a.y, b.x, b.y);
+      }
     }
   },
 
