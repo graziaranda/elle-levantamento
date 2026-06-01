@@ -3397,7 +3397,7 @@ const CanvasEditor = {
       const ny = dy / len;
       const px = -ny;
       const py = nx;
-      const off = d.offset || 400;
+      const off = (d.offset != null) ? d.offset : 400; // preserva negativos
 
       const p1 = { x: d.x1 + px * off, y: d.y1 + py * off };
       const p2 = { x: d.x2 + px * off, y: d.y2 + py * off };
@@ -4227,6 +4227,37 @@ const CanvasEditor = {
     }
   },
 
+  // Garante que o offset da cota sempre vai para o EXTERIOR do desenho.
+  // Calcula o centroide de todas as paredes e força o offset para o lado
+  // que AFASTA do centro (exterior). Offset positivo = lado esquerdo do vetor;
+  // negativo = lado direito. Retorna positivo ou negativo.
+  _exteriorOffset(p1, p2, offsetMag) {
+    const walls = this.project.canvas.walls;
+    if (!walls.length) return offsetMag;
+
+    // Centroide do levantamento (média de todos os endpoints de parede)
+    let cx = 0, cy = 0, n = 0;
+    for (const w of walls) {
+      cx += w.x1 + w.x2; cy += w.y1 + w.y2; n += 2;
+    }
+    cx /= n; cy /= n;
+
+    const dx  = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    if (!len) return offsetMag;
+
+    // Normal perpendicular (lado "esquerdo" do vetor p1→p2)
+    const nx = -dy / len, ny = dx / len;
+    const mx = (p1.x + p2.x) / 2, my = (p1.y + p2.y) / 2;
+
+    // Distância ao centroide com offset positivo vs negativo
+    const dPos = dist(mx + nx * offsetMag, my + ny * offsetMag, cx, cy);
+    const dNeg = dist(mx - nx * offsetMag, my - ny * offsetMag, cx, cy);
+
+    // Retorna o offset que maximiza a distância ao centroide (= exterior)
+    return dPos >= dNeg ? offsetMag : -offsetMag;
+  },
+
   // Calcula o offset ideal para uma nova cota evitar sobreposição com existentes.
   // Tiers: 400 → 900 → 1400 → 1900mm (cada ~50cm mais afastado da parede).
   // Detecta cotas paralelas e com extents sobrepostos — se houver conflito, sobe de nível.
@@ -4296,7 +4327,9 @@ const CanvasEditor = {
     } else {
       const len = dist(this.drawStart.x, this.drawStart.y, snapped.x, snapped.y);
       if (len > 10) {
-        const offset = this._calcDimOffset(this.drawStart, snapped);
+        // Magnitude do offset (tier automático) + sinal que força para o exterior
+        const offsetMag = this._calcDimOffset(this.drawStart, snapped);
+        const offset    = this._exteriorOffset(this.drawStart, snapped, offsetMag);
         this._pushHistory();
         this.project.canvas.dimensions.push({
           id: generateId(),
