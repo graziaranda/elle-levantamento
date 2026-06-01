@@ -2817,13 +2817,21 @@ const CanvasEditor = {
     ctx.moveTo(pt.x, pt.y - c); ctx.lineTo(pt.x, pt.y + c);
     ctx.stroke();
 
-    // Label "Conectar"
-    const fs = 11 / this.zoom;
+    // Label "Conectar" — badge preto + texto branco
+    const fs  = 11 / this.zoom;
+    const pad = 4  / this.zoom;
     ctx.font = `600 ${fs}px Inter,sans-serif`;
-    ctx.fillStyle = '#5A9A70';
-    ctx.textAlign = 'center';
+    ctx.textAlign    = 'center';
     ctx.textBaseline = 'bottom';
-    ctx.fillText('Conectar', pt.x, pt.y - r - 3 / this.zoom);
+    const tw = ctx.measureText('Conectar').width;
+    const bx = pt.x - tw / 2 - pad;
+    const by = pt.y - r - fs - pad * 2 - 2 / this.zoom;
+    ctx.fillStyle = 'rgba(0,0,0,0.92)';
+    ctx.beginPath();
+    ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText('Conectar', pt.x, by + fs + pad * 0.75);
     ctx.textBaseline = 'alphabetic';
   },
 
@@ -4180,34 +4188,41 @@ const CanvasEditor = {
     });
   },
 
-  // Indicador visual de snap arquitetônico: cruz amarela + label do ponto capturado
+  // Indicador visual de snap arquitetônico: cruz branca + badge com fundo escuro
   _drawArchSnap(ctx) {
     const pt = this._archSnapPt;
     if (!pt) return;
     const r = 14 / this.zoom;
-    const c = 5  / this.zoom;
 
-    // Círculo externo pulsante
-    ctx.strokeStyle = 'rgba(255,220,50,0.6)';
-    ctx.lineWidth   = 1.5 / this.zoom;
+    // Círculo externo — preto com borda para visibilidade
+    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+    ctx.lineWidth   = 2 / this.zoom;
     ctx.beginPath(); ctx.arc(pt.x, pt.y, r * 1.6, 0, Math.PI * 2); ctx.stroke();
 
-    // Cruz interna dourada
-    ctx.strokeStyle = '#FFDC32';
-    ctx.lineWidth   = 2 / this.zoom;
+    // Cruz preta
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth   = 2.5 / this.zoom;
     ctx.beginPath();
     ctx.moveTo(pt.x - r, pt.y); ctx.lineTo(pt.x + r, pt.y);
     ctx.moveTo(pt.x, pt.y - r); ctx.lineTo(pt.x, pt.y + r);
     ctx.stroke();
 
-    // Label do ponto (ex: "Canto", "Vão", "Meio")
+    // Badge preto + texto branco
     if (pt.label) {
-      const fs = 11 / this.zoom;
-      ctx.font = `600 ${fs}px Inter,sans-serif`;
-      ctx.fillStyle = '#FFDC32';
-      ctx.textAlign = 'center';
+      const fs  = 11 / this.zoom;
+      const pad = 4  / this.zoom;
+      ctx.font = `700 ${fs}px Inter,sans-serif`;
+      ctx.textAlign    = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(pt.label, pt.x, pt.y - r - 3 / this.zoom);
+      const tw = ctx.measureText(pt.label).width;
+      const bx = pt.x - tw / 2 - pad;
+      const by = pt.y - r * 1.6 - fs - pad * 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.92)';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(pt.label, pt.x, by + fs + pad * 0.75);
       ctx.textBaseline = 'alphabetic';
     }
   },
