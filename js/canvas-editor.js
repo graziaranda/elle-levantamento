@@ -495,11 +495,11 @@ const CanvasEditor = {
     const tw = ctx.measureText('Conectar').width;
     const bx = pt.x - tw / 2 - pad;
     const by = pt.y - r - fs - pad * 2 - 2 / this.zoom;
-    ctx.fillStyle = 'rgba(0,0,0,0.92)';
+    ctx.fillStyle = 'rgba(10,30,18,0.92)'; // fundo escuro com tom verde
     ctx.beginPath();
     ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
     ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
+    ctx.fillStyle = '#5A9A70'; // verde igual ao círculo
     ctx.fillText('Conectar', pt.x, by + fs + pad * 0.75);
     ctx.textBaseline = 'alphabetic';
   },
@@ -553,24 +553,23 @@ const CanvasEditor = {
       candidates.push({ x: cx,             y: cy,             label: 'Centro' });
     }
 
-    // Pontos de instalação — prioridade máxima (0): snap direto no ponto, sem "Face"
+    // Instalações têm prioridade ABSOLUTA — verificar primeiro, retornar imediatamente.
+    // Se há instalação dentro do raio, nunca mostra "Face" — snap vai direto no ponto.
+    const RINST = 22 / this.zoom; // raio ligeiramente maior para instalações
     for (const inst of c.installations) {
-      const entry = getInstallEntry(inst.type);
-      const sym   = entry ? entry.symbol : '?';
-      candidates.push({ x: inst.x, y: inst.y, label: sym, priority: 0 });
+      const d = dist(rawWorld.x, rawWorld.y, inst.x, inst.y);
+      if (d < RINST) {
+        const entry = getInstallEntry(inst.type);
+        return { x: inst.x, y: inst.y, label: entry ? entry.symbol : '?', priority: 0 };
+      }
     }
 
-    // Encontrar o mais próximo dentro do raio com sistema de prioridade:
-    // 0 = instalação (melhor — snap exato, sem "Face")
-    // 1 = face de parede
-    // Instalação ganha sobre face mesmo se um pouco mais distante (bônus -8px)
+    // Sem instalação próxima: usa face de parede normalmente
     let best = null, bestScore = Infinity;
     for (const pt of candidates) {
       const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
       if (d >= R) continue;
-      // Penalidade de 8px para face quando há instalação competindo
-      const score = d + (pt.priority === 0 ? -8 / this.zoom : 0);
-      if (score < bestScore) { bestScore = score; best = pt; }
+      if (d < bestScore) { bestScore = d; best = pt; }
     }
 
     return best;
