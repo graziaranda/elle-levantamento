@@ -3173,25 +3173,39 @@ const CanvasEditor = {
         ctx.stroke();
       }
 
-      // Value
-      const val = d.value != null ? d.value : Math.round(len);
-      const label = val >= 1000 ? `${(val / 1000).toFixed(3).replace('.',',')}m` : `${val}mm`;
+      // Label de valor
+      const val   = d.value != null ? d.value : Math.round(len);
+      const label = val >= 1000
+        ? `${(val / 1000).toFixed(3).replace('.', ',')}m`
+        : `${val}mm`;
       const mx = (p1.x + p2.x) / 2;
       const my = (p1.y + p2.y) / 2;
-      const fs = 15 / this.zoom;
+      const fs = 14 / this.zoom;
       const u  = 1 / this.zoom;
+
+      // Normalizar ângulo: texto nunca aparece de cabeça para baixo
+      let ang = Math.atan2(dy, dx);
+      if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
 
       ctx.save();
       ctx.translate(mx, my);
-      ctx.rotate(Math.atan2(dy, dx));
+      ctx.rotate(ang);
       ctx.font = `600 ${fs}px Inter,sans-serif`;
-      ctx.textAlign = 'center';
-      // fundo (pílula) para legibilidade
-      const tw = ctx.measureText(label).width;
-      ctx.fillStyle = '#1A1814';
-      ctx.fillRect(-tw / 2 - 5 * u, -fs - 3 * u, tw + 10 * u, fs + 5 * u);
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'alphabetic';
+
+      const tw  = ctx.measureText(label).width;
+      const pad = 5 * u;
+      // Posicionar acima da linha de cota (fora — não em cima da linha)
+      const yOff = -(fs + 6 * u);
+
+      // Fundo arredondado
+      ctx.fillStyle = 'rgba(26,24,20,0.88)';
+      ctx.beginPath();
+      ctx.roundRect(-tw / 2 - pad, yOff - fs, tw + pad * 2, fs + pad, 3 * u);
+      ctx.fill();
       ctx.fillStyle = color;
-      ctx.fillText(label, 0, -4 * u);
+      ctx.fillText(label, 0, yOff);
       ctx.restore();
     }
   },
