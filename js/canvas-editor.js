@@ -619,7 +619,7 @@ const CanvasEditor = {
         const nexts   = (endMap.get(nextKey) || []).filter(e => e.wid !== w.id && !used.has(e.wid));
         if (nexts.length === 1) {
           const nxt = wallById(nexts[0].wid);
-          end = nexts[0].end === '1' ? '2' : '1'; // vamos sair pelo outro lado
+          end = nexts[0].end; // entramos pelo endpoint que conecta, saímos pelo outro
           w   = nxt;
           pts.pop(); // o ponto final do segmento vira o inicial do próximo
         } else {
