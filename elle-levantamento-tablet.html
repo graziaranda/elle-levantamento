@@ -4003,9 +4003,22 @@ const CanvasEditor = {
       if (d < bestDist && t >= 0 && t <= 1) { bestDist = d; bestWall = w; bestT = t; }
     }
     if (bestWall && bestDist <= 700 / this.zoom) {
-      const refX = bestWall.x1 + (bestWall.x2 - bestWall.x1) * bestT;
-      const refY = bestWall.y1 + (bestWall.y2 - bestWall.y1) * bestT;
-      this._placingInstall = { wallId: bestWall.id, wallT: bestT, refX, refY };
+      // Referência = canto mais próximo da parede (start ou end), não onde o dedo soltou.
+      // O ponto azul fica sempre fixo num canto — só muda ao ⇄ para o outro canto.
+      const wl  = dist(bestWall.x1, bestWall.y1, bestWall.x2, bestWall.y2);
+      const dS  = dist(rawWorld.x, rawWorld.y, bestWall.x1, bestWall.y1);
+      const dE  = dist(rawWorld.x, rawWorld.y, bestWall.x2, bestWall.y2);
+      const nearStart = dS <= dE;
+      this._placingInstall = {
+        wallId:     bestWall.id,
+        wallT:      bestT,
+        nearStart,
+        // ponto azul = canto fixo (start ou end)
+        refX: nearStart ? bestWall.x1 : bestWall.x2,
+        refY: nearStart ? bestWall.y1 : bestWall.y2,
+        // distância inicial = onde o dedo soltou (pré-preenchimento conveniente)
+        initDistCm: Math.round((nearStart ? bestT * wl : (1 - bestT) * wl) / 10),
+      };
     } else {
       this._placingInstall = null;
     }
@@ -4107,10 +4120,24 @@ const CanvasEditor = {
     `);
 
     let selectedType = null;
-    let fromEnd = 'start';
+    // nearStart: true = referência no canto x1/y1, false = canto x2/y2
+    let nearStart = this._placingInstall?.nearStart !== false; // default: canto mais próximo
+    let fromEnd   = nearStart ? 'start' : 'end';
 
     const clearPreview = () => { this._installPreview = null; this._placingInstall = null; };
     const closeForm    = () => { clearPreview(); this._closeSidePanel(); this._draw(); };
+
+    // Atualiza posição do ponto de referência (canto azul) e do preview da instalação
+    const updateCornerRef = () => {
+      const refX = nearStart ? wall.x1 : wall.x2;
+      const refY = nearStart ? wall.y1 : wall.y2;
+      if (this._placingInstall) {
+        this._placingInstall.refX = refX;
+        this._placingInstall.refY = refY;
+        this._placingInstall.nearStart = nearStart;
+      }
+    };
+    updateCornerRef(); // aplicar imediatamente
 
     const syncPreview = (type, distCm) => {
       if (!type) return;
@@ -4131,7 +4158,8 @@ const CanvasEditor = {
       selectedType = type;
       const entry    = getInstallEntry(type) || { label: type, defaultHeight: null };
       const defH     = entry.defaultHeight != null ? String(entry.defaultHeight) : '';
-      const distCm   = Math.round(wallT * wallLen / 10); // distância inicial em cm
+      // Distância inicial = do canto de referência até onde o dedo soltou
+      const distCm   = this._placingInstall?.initDistCm ?? Math.round(wallT * wallLen / 10);
 
       document.getElementById('install-body').innerHTML = `
         <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;">${esc(entry.label)}</div>
@@ -4186,12 +4214,22 @@ const CanvasEditor = {
       }
 
       if (btn.id === 'inst-flip') {
-        fromEnd = fromEnd === 'start' ? 'end' : 'start';
+        // Troca o canto de referência — ponto azul move para o outro extremo da parede
+        nearStart = !nearStart;
+        fromEnd   = nearStart ? 'start' : 'end';
+        updateCornerRef();  // move o ponto azul para o novo canto
         const hint = panel.querySelector('.op-ref-hint');
         if (hint) hint.lastChild.textContent =
-          ` Canto ${fromEnd === 'start' ? 'inicial' : 'final'} = referência`;
+          ` Canto ${nearStart ? 'inicial' : 'final'} (azul) = referência`;
         const d = panel.querySelector('#inst-dist');
-        if (d) syncPreview(selectedType, d.value);
+        // Recalcular distância a partir do novo canto
+        if (d && selectedType) {
+          const oldDmm = parseLocaleFloat(d.value) * 10;
+          const newDmm = wallLen - oldDmm;
+          d.value = Math.max(0, Math.round(newDmm / 10));
+          syncPreview(selectedType, d.value);
+        }
+        this._draw();
         return;
       }
 
