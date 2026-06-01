@@ -512,15 +512,21 @@ const CanvasEditor = {
       const nx = -dy / len, ny = dx / len; // normal perpendicular à parede
       const t  = (w.thickness || 150) / 2; // metade da espessura
 
-      // REGRA: snap SEMPRE na face (arquiteta nunca mede pelo eixo).
-      // Para cada ponto chave (cantos + meio), dois snap points: face interna e externa.
+      // REGRA: snap APENAS na face de onde o usuário está tocando.
+      // Arquiteta trabalha sempre dentro do ambiente → snap capta a face interna.
+      // Só UMA face por ponto (a do lado do toque) — sem face oposta/externa.
       for (const [px, py] of [
         [w.x1, w.y1],
         [w.x2, w.y2],
         [(w.x1+w.x2)/2, (w.y1+w.y2)/2],
       ]) {
-        candidates.push({ x: px + nx*t, y: py + ny*t, label: 'Face', priority: 1 });
-        candidates.push({ x: px - nx*t, y: py - ny*t, label: 'Face', priority: 1 });
+        const toX = rawWorld.x - px, toY = rawWorld.y - py;
+        const onNSide = nx * toX + ny * toY; // positivo = usuário está do lado do normal
+        if (onNSide > 0) {
+          candidates.push({ x: px + nx*t, y: py + ny*t, label: 'Face', priority: 1 });
+        } else {
+          candidates.push({ x: px - nx*t, y: py - ny*t, label: 'Face', priority: 1 });
+        }
       }
     }
 
