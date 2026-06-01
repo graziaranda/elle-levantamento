@@ -512,16 +512,15 @@ const CanvasEditor = {
       const nx = -dy / len, ny = dx / len; // normal perpendicular à parede
       const t  = (w.thickness || 150) / 2; // metade da espessura
 
-      // Pontos no EIXO da parede (centerline)
-      for (const [px, py, lbl] of [
-        [w.x1, w.y1, 'Eixo'],
-        [w.x2, w.y2, 'Eixo'],
-        [(w.x1+w.x2)/2, (w.y1+w.y2)/2, 'Meio'],
+      // REGRA: snap SEMPRE na face (arquiteta nunca mede pelo eixo).
+      // Para cada ponto chave (cantos + meio), dois snap points: face interna e externa.
+      for (const [px, py] of [
+        [w.x1, w.y1],
+        [w.x2, w.y2],
+        [(w.x1+w.x2)/2, (w.y1+w.y2)/2],
       ]) {
-        candidates.push({ x: px, y: py, label: lbl, priority: 1 });
-        // FACE interna e externa (perpendicular ao eixo)
-        candidates.push({ x: px + nx*t, y: py + ny*t, label: 'Face', priority: 2 });
-        candidates.push({ x: px - nx*t, y: py - ny*t, label: 'Face', priority: 2 });
+        candidates.push({ x: px + nx*t, y: py + ny*t, label: 'Face', priority: 1 });
+        candidates.push({ x: px - nx*t, y: py - ny*t, label: 'Face', priority: 1 });
       }
     }
 
@@ -882,11 +881,12 @@ const CanvasEditor = {
       const tw = ctx.measureText(label).width;
       // Fundo do label
       const pad = 4 / this.zoom;
-      ctx.fillStyle = 'rgba(26,24,20,0.82)';
+      ctx.fillStyle = 'rgba(18,16,14,0.92)'; // mais opaco = mais contraste
       ctx.beginPath();
       ctx.roundRect(-tw / 2 - pad, yOff - fs - pad, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
       ctx.fill();
-      ctx.fillStyle = sel ? '#C9A84C' : '#D4C8A8';
+      // Branco para contraste no fundo escuro do pill
+      ctx.fillStyle = sel ? '#C9A84C' : '#FFFFFF';
       ctx.fillText(label, 0, yOff);
       ctx.restore();
     }
@@ -1018,7 +1018,7 @@ const CanvasEditor = {
       ctx.beginPath();
       ctx.roundRect(-tw/2 - 4/this.zoom, offY - fs - 2/this.zoom, tw + 8/this.zoom, fs + 4/this.zoom, 3/this.zoom);
       ctx.fill();
-      ctx.fillStyle = preview ? '#C9A84C' : (sel ? '#C9A84C' : 'rgba(200,184,150,0.9)');
+      ctx.fillStyle = (preview || sel) ? '#C9A84C' : '#FFFFFF';
       ctx.fillText(line1, 0, offY);
 
       if (line2) {
