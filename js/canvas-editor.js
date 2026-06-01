@@ -972,6 +972,48 @@ const CanvasEditor = {
         ctx.stroke();
       }
     }
+
+    // Label discreto largura × altura — só no preview (durante o formulário)
+    // Confirma visualmente as medidas que a arquiteta está digitando
+    if (preview && o.width) {
+      const wCm = Math.round((o.width  || 0) / 10);
+      const hCm = o.height ? Math.round(o.height / 10) : null;
+      const sill = (!isDoor && o.sill) ? Math.round(o.sill / 10) : null;
+      const line1 = hCm ? `${wCm}×${hCm}cm` : `${wCm}cm`;
+      const line2 = sill ? `peit. ${sill}cm` : null;
+
+      const fs   = 11 / this.zoom;
+      const offY = -(w.thickness || 150) / 2 - 18 / this.zoom;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.font      = `600 ${fs}px Inter,sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+
+      // Fundo
+      const tw = ctx.measureText(line1).width;
+      ctx.fillStyle = 'rgba(26,24,20,0.75)';
+      ctx.beginPath();
+      ctx.roundRect(-tw/2 - 4/this.zoom, offY - fs - 2/this.zoom, tw + 8/this.zoom, fs + 4/this.zoom, 3/this.zoom);
+      ctx.fill();
+      ctx.fillStyle = '#C9A84C';
+      ctx.fillText(line1, 0, offY);
+
+      if (line2) {
+        const tw2 = ctx.measureText(line2).width;
+        ctx.fillStyle = 'rgba(26,24,20,0.75)';
+        ctx.beginPath();
+        ctx.roundRect(-tw2/2 - 4/this.zoom, offY - fs*2 - 6/this.zoom, tw2 + 8/this.zoom, fs + 4/this.zoom, 3/this.zoom);
+        ctx.fill();
+        ctx.fillStyle = '#7FB0E0';
+        ctx.fillText(line2, 0, offY - fs - 4/this.zoom);
+      }
+
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    }
+
     ctx.restore();
   },
 
@@ -2129,31 +2171,71 @@ const CanvasEditor = {
     ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
     ctx.restore();
 
-    // Ponto azul no canto de referência (fixo — âncora de medida)
-    if (pl.refX != null) {
-      // Halo externo
-      ctx.strokeStyle = 'rgba(91,155,213,0.4)';
-      ctx.lineWidth   = 2 / this.zoom;
-      ctx.beginPath(); ctx.arc(pl.refX, pl.refY, 18 / this.zoom, 0, Math.PI * 2); ctx.stroke();
-      // Disco sólido
-      ctx.fillStyle = '#5B9BD5';
-      ctx.beginPath(); ctx.arc(pl.refX, pl.refY, 11 / this.zoom, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
-    }
+    const refX = pl.refX;
+    const refY = pl.refY;
+    if (refX == null) return;
 
-    // Linha tracejada do canto até a posição da instalação (quando preview ativo)
-    if (this._installPreview && pl.refX != null) {
+    if (this._installPreview) {
       const ip = this._installPreview;
-      ctx.save();
-      ctx.strokeStyle = 'rgba(91,155,213,0.5)';
+
+      // Calcular face: refX + faceOffset na direção da instalação (mesmo critério da porta)
+      const toInst = { x: ip.x - refX, y: ip.y - refY };
+      const toInstL = Math.sqrt(toInst.x**2 + toInst.y**2);
+      const faceOff = (w.thickness || 150) / 2;
+      const faceX   = toInstL > 0 ? refX + (toInst.x/toInstL)*faceOff : refX;
+      const faceY   = toInstL > 0 ? refY + (toInst.y/toInstL)*faceOff : refY;
+
+      // Ponto azul NA FACE (não no eixo)
+      ctx.strokeStyle = 'rgba(91,155,213,0.4)';
       ctx.lineWidth   = 1.5 / this.zoom;
-      ctx.setLineDash([80 / this.zoom, 50 / this.zoom]);
+      ctx.beginPath(); ctx.arc(faceX, faceY, 18 / this.zoom, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#5B9BD5';
+      ctx.beginPath(); ctx.arc(faceX, faceY, 11 / this.zoom, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
+
+      // Cota tracejada FACE → instalação (= o que o usuário digitou)
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const wlen = Math.sqrt(dx*dx + dy*dy);
+      const perp = wlen > 0 ? { x: -dy/wlen, y: dx/wlen } : { x: 0, y: 1 };
+      const offP = { x: perp.x * (w.thickness || 150) * 0.9, y: perp.y * (w.thickness || 150) * 0.9 };
+
+      ctx.save();
+      ctx.strokeStyle = '#5B9BD5';
+      ctx.lineWidth   = 1.5 / this.zoom;
+      ctx.setLineDash([12 / this.zoom, 6 / this.zoom]);
       ctx.beginPath();
-      ctx.moveTo(pl.refX, pl.refY);
-      ctx.lineTo(ip.x, ip.y);
+      ctx.moveTo(faceX + offP.x, faceY + offP.y);
+      ctx.lineTo(ip.x  + offP.x, ip.y  + offP.y);
       ctx.stroke();
       ctx.setLineDash([]);
+      for (const [px, py] of [[faceX, faceY], [ip.x, ip.y]]) {
+        const r = 5 / this.zoom;
+        ctx.beginPath();
+        ctx.moveTo(px + offP.x - perp.x*r, py + offP.y - perp.y*r);
+        ctx.lineTo(px + offP.x + perp.x*r, py + offP.y + perp.y*r);
+        ctx.stroke();
+      }
+      const userMm = Math.max(0, dist(faceX, faceY, ip.x, ip.y));
+      const lbl = userMm >= 1000
+        ? `${(userMm/1000).toFixed(2)}m`
+        : `${Math.round(userMm)}mm`;
+      const mx2 = (faceX + ip.x)/2 + offP.x*1.4;
+      const my2 = (faceY + ip.y)/2 + offP.y*1.4;
+      const fs2 = 11 / this.zoom;
+      ctx.font = `600 ${fs2}px Inter,sans-serif`;
+      ctx.fillStyle = '#5B9BD5';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(lbl, mx2, my2);
+      ctx.textBaseline = 'alphabetic';
       ctx.restore();
+    } else {
+      // Sem preview: ponto azul no eixo (antes de escolher tipo)
+      ctx.strokeStyle = 'rgba(91,155,213,0.4)';
+      ctx.lineWidth   = 1.5 / this.zoom;
+      ctx.beginPath(); ctx.arc(refX, refY, 18 / this.zoom, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#5B9BD5';
+      ctx.beginPath(); ctx.arc(refX, refY, 11 / this.zoom, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
     }
   },
 
