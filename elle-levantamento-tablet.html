@@ -1860,12 +1860,10 @@ function esc(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Formata mm para exibição: ≥1000mm → "1,250m" / <1000mm → "850mm"
+// Formata mm → "X,XXm" — sempre metros, 2 casas decimais, vírgula PT-BR
 function fmtMm(mm) {
   if (mm == null) return '—';
-  return mm >= 1000
-    ? `${(mm / 1000).toFixed(3).replace('.', ',')}m`
-    : `${Math.round(mm)}mm`;
+  return (mm / 1000).toFixed(2).replace('.', ',') + 'm';
 }
 
 // Formata m² (área em mm²) para exibição
@@ -2840,32 +2838,40 @@ const CanvasEditor = {
   // Para paredes: além dos eixos (centro), também as FACES (±espessura/2)
   // perpendicularmente, para cotas internas e externas corretas.
   _snapToArchPoint(rawWorld) {
-    const R  = 20 / this.zoom;
+    const R  = 28 / this.zoom;
     const c  = this.project.canvas;
     const candidates = [];
 
+    // Projeção perpendicular sobre o eixo de cada parede.
+    // Snap point fica SOBRE a face — nunca flutua no vazio.
     for (const w of c.walls) {
       const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx*dx + dy*dy);
       if (!len) continue;
-      const nx = -dy / len, ny = dx / len; // normal perpendicular à parede
-      const t  = (w.thickness || 150) / 2; // metade da espessura
+      const ux = dx / len, uy = dy / len;
+      const nx = -uy,       ny = ux;
+      const t  = (w.thickness || 150) / 2;
 
-      // REGRA: snap APENAS na face de onde o usuário está tocando.
-      // Arquiteta trabalha sempre dentro do ambiente → snap capta a face interna.
-      // Só UMA face por ponto (a do lado do toque) — sem face oposta/externa.
-      for (const [px, py] of [
-        [w.x1, w.y1],
-        [w.x2, w.y2],
-        [(w.x1+w.x2)/2, (w.y1+w.y2)/2],
-      ]) {
-        const toX = rawWorld.x - px, toY = rawWorld.y - py;
-        const onNSide = nx * toX + ny * toY; // positivo = usuário está do lado do normal
-        if (onNSide > 0) {
-          candidates.push({ x: px + nx*t, y: py + ny*t, label: 'Face', priority: 1 });
-        } else {
-          candidates.push({ x: px - nx*t, y: py - ny*t, label: 'Face', priority: 1 });
-        }
+      const rx = rawWorld.x - w.x1, ry = rawWorld.y - w.y1;
+      const along = rx * ux + ry * uy;
+      const perp  = rx * nx + ry * ny;
+
+      if (Math.abs(perp) > t + R) continue;
+
+      const clAlong = Math.max(0, Math.min(len, along));
+      const projX = w.x1 + ux * clAlong;
+      const projY = w.y1 + uy * clAlong;
+
+      const sign = perp >= 0 ? 1 : -1;
+      const fx = sign * nx * t, fy = sign * ny * t;
+
+      const snapX = projX + fx, snapY = projY + fy;
+      const d = dist(rawWorld.x, rawWorld.y, snapX, snapY);
+      if (d < R) {
+        candidates.push({
+          x: snapX, y: snapY, priority: 1,
+          faceSeg: { x1: w.x1 + fx, y1: w.y1 + fy, x2: w.x2 + fx, y2: w.y2 + fy },
+        });
       }
     }
 
@@ -2884,9 +2890,8 @@ const CanvasEditor = {
       candidates.push({ x: cx,             y: cy,             label: 'Centro' });
     }
 
-    // Instalações têm prioridade ABSOLUTA — verificar primeiro, retornar imediatamente.
-    // Se há instalação dentro do raio, nunca mostra "Face" — snap vai direto no ponto.
-    const RINST = 22 / this.zoom; // raio ligeiramente maior para instalações
+    // Instalações — prioridade absoluta
+    const RINST = 22 / this.zoom;
     for (const inst of c.installations) {
       const d = dist(rawWorld.x, rawWorld.y, inst.x, inst.y);
       if (d < RINST) {
@@ -2895,7 +2900,6 @@ const CanvasEditor = {
       }
     }
 
-    // Sem instalação próxima: usa face de parede normalmente
     let best = null, bestScore = Infinity;
     for (const pt of candidates) {
       const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
@@ -3214,7 +3218,7 @@ const CanvasEditor = {
       let ang = Math.atan2(dy, dx);
       if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
 
-      const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+      const label = fmtMm(len);
 
       ctx.save();
       ctx.translate(mx, my);
@@ -3397,7 +3401,9 @@ const CanvasEditor = {
       const ny = dy / len;
       const px = -ny;
       const py = nx;
-      const off = (d.offset != null) ? d.offset : 400; // preserva negativos
+      // Sempre forçar exterior — usa magnitude salva mas recalcula o sinal
+      const offMag = Math.abs((d.offset != null) ? d.offset : 400);
+      const off    = this._exteriorOffset({ x: d.x1, y: d.y1 }, { x: d.x2, y: d.y2 }, offMag);
 
       const p1 = { x: d.x1 + px * off, y: d.y1 + py * off };
       const p2 = { x: d.x2 + px * off, y: d.y2 + py * off };
@@ -3431,9 +3437,7 @@ const CanvasEditor = {
 
       // Label de valor
       const val   = d.value != null ? d.value : Math.round(len);
-      const label = val >= 1000
-        ? `${(val / 1000).toFixed(3).replace('.', ',')}m`
-        : `${val}mm`;
+      const label = fmtMm(val);
       const mx = (p1.x + p2.x) / 2;
       const my = (p1.y + p2.y) / 2;
       const fs = 14 / this.zoom;
@@ -3648,7 +3652,7 @@ const CanvasEditor = {
       // Length label
       const len = dist(x1, y1, x2, y2);
       if (len > 10) {
-        const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+        const label = fmtMm(len);
         const fs = 16 / this.zoom;
         ctx.font      = `600 ${fs}px Inter,sans-serif`;
         ctx.textAlign = 'center';
@@ -3683,7 +3687,7 @@ const CanvasEditor = {
 
     if (this.currentTool === 'dimension') {
       const len = dist(x1, y1, x2, y2);
-      const label = len >= 1000 ? `${(len / 1000).toFixed(2)}m` : `${Math.round(len)}mm`;
+      const label = fmtMm(len);
       ctx.strokeStyle = 'rgba(201,168,76,0.5)';
       ctx.lineWidth   = 2 / this.zoom;
       ctx.setLineDash([150 / this.zoom, 80 / this.zoom]);
@@ -4188,26 +4192,37 @@ const CanvasEditor = {
     });
   },
 
-  // Indicador visual de snap arquitetônico: cruz branca + badge com fundo escuro
   _drawArchSnap(ctx) {
     const pt = this._archSnapPt;
     if (!pt) return;
     const r = 14 / this.zoom;
 
-    // Círculo externo — preto com borda para visibilidade
-    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-    ctx.lineWidth   = 2 / this.zoom;
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, r * 1.6, 0, Math.PI * 2); ctx.stroke();
+    // Linha ciano na face inteira — mostra qual face está sendo capturada
+    if (pt.faceSeg) {
+      const s = pt.faceSeg;
+      ctx.save();
+      ctx.strokeStyle = '#00C8FF';
+      ctx.lineWidth   = 3.5 / this.zoom;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(s.x1, s.y1);
+      ctx.lineTo(s.x2, s.y2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
-    // Cruz preta
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth   = 2.5 / this.zoom;
+    // Círculo + cruz ciano no ponto exato
+    ctx.strokeStyle = '#00C8FF';
+    ctx.lineWidth   = 2 / this.zoom;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.lineWidth = 2.5 / this.zoom;
     ctx.beginPath();
-    ctx.moveTo(pt.x - r, pt.y); ctx.lineTo(pt.x + r, pt.y);
-    ctx.moveTo(pt.x, pt.y - r); ctx.lineTo(pt.x, pt.y + r);
+    ctx.moveTo(pt.x - r * 0.7, pt.y); ctx.lineTo(pt.x + r * 0.7, pt.y);
+    ctx.moveTo(pt.x, pt.y - r * 0.7); ctx.lineTo(pt.x, pt.y + r * 0.7);
     ctx.stroke();
 
-    // Badge preto + texto branco
+    // Badge de label (Vão / Centro) se existir
     if (pt.label) {
       const fs  = 11 / this.zoom;
       const pad = 4  / this.zoom;
@@ -4221,7 +4236,7 @@ const CanvasEditor = {
       ctx.beginPath();
       ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
       ctx.fill();
-      ctx.fillStyle = '#FFFFFF';
+      ctx.fillStyle = '#00C8FF';
       ctx.fillText(pt.label, pt.x, by + fs + pad * 0.75);
       ctx.textBaseline = 'alphabetic';
     }
@@ -4532,9 +4547,7 @@ const CanvasEditor = {
       }
       // Label: distância da FACE até o vão = exatamente o que o usuário digitou
       const userMm = Math.max(0, dist(faceX, faceY, edgeX, edgeY));
-      const distLabel = userMm >= 1000
-        ? `${(userMm / 1000).toFixed(2)}m`
-        : `${Math.round(userMm)}mm`;
+      const distLabel = fmtMm(userMm);
       const mx2 = (faceX + edgeX) / 2 + offPerp.x * 1.4;
       const my2 = (faceY + edgeY) / 2 + offPerp.y * 1.4;
       const fs2 = 12 / this.zoom;
@@ -4715,9 +4728,7 @@ const CanvasEditor = {
         ctx.stroke();
       }
       const userMm = Math.max(0, dist(faceX, faceY, ip.x, ip.y));
-      const lbl = userMm >= 1000
-        ? `${(userMm/1000).toFixed(2)}m`
-        : `${Math.round(userMm)}mm`;
+      const lbl = fmtMm(userMm);
       const mx2 = (faceX + ip.x)/2 + offP.x*1.4;
       const my2 = (faceY + ip.y)/2 + offP.y*1.4;
       const fs2 = 11 / this.zoom;

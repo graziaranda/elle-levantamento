@@ -1089,7 +1089,9 @@ const CanvasEditor = {
       const ny = dy / len;
       const px = -ny;
       const py = nx;
-      const off = (d.offset != null) ? d.offset : 400; // preserva negativos
+      // Sempre forçar exterior — usa magnitude salva mas recalcula o sinal
+      const offMag = Math.abs((d.offset != null) ? d.offset : 400);
+      const off    = this._exteriorOffset({ x: d.x1, y: d.y1 }, { x: d.x2, y: d.y2 }, offMag);
 
       const p1 = { x: d.x1 + px * off, y: d.y1 + py * off };
       const p2 = { x: d.x2 + px * off, y: d.y2 + py * off };
