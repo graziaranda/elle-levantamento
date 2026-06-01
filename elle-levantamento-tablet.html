@@ -3105,17 +3105,20 @@ const CanvasEditor = {
         seg.push({ nx, ny, dx: dx/len, dy: dy/len });
       }
       // Calcula ponto de miter para o lado "esq" ou "dir" em cada junction
+      // i=0 em chain fechada → usa seg[ns-1] como s1 (wraparound)
       const miterPt = (i, sign) => {
-        // i = índice do junction (entre seg[i-1] e seg[i])
-        const s1 = seg[i-1], s2 = seg[i];
-        const P  = pts[i];
+        const prevIdx = (i - 1 + ns) % ns; // wraparound seguro: -1 → ns-1
+        const s1 = seg[prevIdx], s2 = seg[i % ns];
+        const P  = pts[i % pts.length];
+        if (!s1 || !s2 || (!s1.dx && !s1.dy) || (!s2.dx && !s2.dy)) {
+          return { x: P.x + sign*(s2||s1).nx*h, y: P.y + sign*(s2||s1).ny*h };
+        }
         const p1 = { x: P.x + sign*s1.nx*h, y: P.y + sign*s1.ny*h };
         const p2 = { x: P.x + sign*s2.nx*h, y: P.y + sign*s2.ny*h };
         const isect = lineIsect(p1, { x: s1.dx, y: s1.dy }, p2, { x: s2.dx, y: s2.dy });
         if (!isect) return p1;
-        // Limitar miter excessivo (evita spikes em ângulos muito agudos)
         const dMiter = Math.sqrt((isect.x-P.x)**2 + (isect.y-P.y)**2);
-        if (dMiter > h * 8) return p1; // fallback para bevel
+        if (dMiter > h * 8) return p1;
         return isect;
       };
 
@@ -3155,8 +3158,8 @@ const CanvasEditor = {
       const p0     = pts[0], pN = pts[pts.length-1];
       const closed = Math.sqrt((pN.x-p0.x)**2+(pN.y-p0.y)**2) < 25;
 
-      // Para loop fechado, fechar a array de pontos para calcular miter no closing corner
-      const polyPts = closed ? [...pts, pts[1]] : pts;
+      // Para loop fechado: não acrescentar pts[1] — chainPoly usa wraparound
+      const polyPts = pts;
       if (polyPts.length < 2) continue;
 
       const poly = chainPoly(polyPts, t, closed);
