@@ -3176,24 +3176,61 @@ const CanvasEditor = {
       return [...left, ...[...right].reverse()];
     };
 
+    // ── Offscreen: preenche paredes e corta vãos de aberturas ──────────────
+    // Canvas temporário em coordenadas de pixel — destination-out não afeta
+    // o fundo/grade/ambientes já desenhados no ctx principal.
+    const W = this.canvas.width, H = this.canvas.height;
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const oc = off.getContext('2d');
+    oc.translate(this.panX, this.panY);
+    oc.scale(this.zoom, this.zoom);
+
+    // 3a. Polígonos das cadeias de paredes
     for (const chain of chains) {
       const t      = chain.thickness;
       const pts    = chain.pts;
       const p0     = pts[0], pN = pts[pts.length-1];
       const closed = Math.sqrt((pN.x-p0.x)**2+(pN.y-p0.y)**2) < 25;
-
-      // Para loop fechado: não acrescentar pts[1] — chainPoly usa wraparound
-      const polyPts = pts;
-      if (polyPts.length < 2) continue;
-
-      const poly = chainPoly(polyPts, t, closed);
-      ctx.fillStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
-      ctx.beginPath();
-      ctx.moveTo(poly[0].x, poly[0].y);
-      for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
-      ctx.closePath();
-      ctx.fill();
+      if (pts.length < 2) continue;
+      const poly = chainPoly(pts, t, closed);
+      oc.fillStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
+      oc.beginPath();
+      oc.moveTo(poly[0].x, poly[0].y);
+      for (let i = 1; i < poly.length; i++) oc.lineTo(poly[i].x, poly[i].y);
+      oc.closePath();
+      oc.fill();
     }
+
+    // 3b. Corte dos vãos (destination-out apaga a área da abertura na parede)
+    oc.globalCompositeOperation = 'destination-out';
+    oc.fillStyle = 'rgba(0,0,0,1)';
+    for (const o of this.project.canvas.openings) {
+      const w = walls.find(w => w.id === o.wallId);
+      if (!w) continue;
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      if (!len) continue;
+      const ux = dx/len, uy = dy/len;
+      const nx = -uy, ny = ux;
+      const thick = (w.thickness || 150) / 2 + 4;
+      const half  = (o.width || 900) / 2;
+      const cx = w.x1 + ux * len * o.position;
+      const cy = w.y1 + uy * len * o.position;
+      oc.beginPath();
+      oc.moveTo(cx - ux*half - nx*thick, cy - uy*half - ny*thick);
+      oc.lineTo(cx + ux*half - nx*thick, cy + uy*half - ny*thick);
+      oc.lineTo(cx + ux*half + nx*thick, cy + uy*half + ny*thick);
+      oc.lineTo(cx - ux*half + nx*thick, cy - uy*half + ny*thick);
+      oc.closePath();
+      oc.fill();
+    }
+
+    // 3c. Composta no canvas principal (pixel coords — reseta transform temporariamente)
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(off, 0, 0);
+    ctx.restore();
 
     // ── Labels de comprimento ──
     // Posicionados FORA do corpo da parede (offset perpendicular = espessura/2 + margem).
