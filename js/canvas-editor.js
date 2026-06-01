@@ -641,9 +641,9 @@ const CanvasEditor = {
       if (pts.length >= 2) chains.push({ pts, thickness: w.thickness || 150, sel: this.selected?.id === w.id });
     }
 
-    // 3. Desenhar cada cadeia como único path
-    ctx.lineCap  = 'square';
-    ctx.lineJoin = 'miter';
+    // 3. Desenhar cada cadeia como único path (lineJoin:miter para cantos limpos)
+    ctx.lineCap    = 'square';
+    ctx.lineJoin   = 'miter';
     ctx.miterLimit = 10;
 
     for (const chain of chains) {
@@ -657,15 +657,46 @@ const CanvasEditor = {
       ctx.stroke();
     }
 
+    // 4. Disco nos endpoints compartilhados — cobre gaps residuais em T-junctions
+    // e qualquer ângulo que o miter não cubra (3 paredes no mesmo ponto, etc.)
+    ctx.fillStyle = '#F0EBE0';
+    for (const ep of endMap.values()) {
+      const count = ep.reduce ? ep.reduce((n, _) => n + 1, 0) : ep.length;
+      if (count < 2) continue;
+    }
+    // Reconstruir mapa de contagem simples para o disco
+    const epCount = new Map();
+    for (const w of walls) {
+      const t = w.thickness || 150;
+      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
+        const k = epKey(px, py);
+        if (!epCount.has(k)) epCount.set(k, { x: px, y: py, t, n: 0 });
+        const ep = epCount.get(k);
+        ep.n++;
+        if (t > ep.t) ep.t = t;
+      }
+    }
+    ctx.fillStyle = '#F0EBE0';
+    for (const ep of epCount.values()) {
+      if (ep.n < 2) continue;
+      // Disco de raio t/√2 cobre o canto externo de junções a 90° e diagonais
+      ctx.beginPath();
+      ctx.arc(ep.x, ep.y, ep.t / Math.SQRT2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // ── Labels de comprimento ──
-    // Visíveis quando a parede ≥ 80px na tela. Texto normalizado (nunca invertido).
+    // Posicionados FORA do corpo da parede (offset perpendicular = espessura/2 + margem).
+    // Texto normalizado: nunca aparece de cabeça para baixo.
     for (const w of walls) {
       const sel = this.selected?.id === w.id;
       const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
       if (!sel && len * this.zoom < 80) continue;
 
-      const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+      const t   = w.thickness || 150;
+      const mx  = (w.x1 + w.x2) / 2;
+      const my  = (w.y1 + w.y2) / 2;
       let ang = Math.atan2(dy, dx);
       if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
 
@@ -674,14 +705,19 @@ const CanvasEditor = {
       ctx.save();
       ctx.translate(mx, my);
       ctx.rotate(ang);
-      const fs = 14 / this.zoom;
+      const fs  = 13 / this.zoom;
+      const yOff = -(t / 2 + 14 / this.zoom);  // FORA da parede: acima da superfície
       ctx.font = `500 ${fs}px Inter,sans-serif`;
       ctx.textAlign = 'center';
       const tw = ctx.measureText(label).width;
-      ctx.fillStyle = '#1A1814';
-      ctx.fillRect(-tw / 2 - 4 / this.zoom, -fs - 11 / this.zoom, tw + 8 / this.zoom, fs + 5 / this.zoom);
-      ctx.fillStyle = sel ? 'rgba(201,168,76,0.95)' : 'rgba(200,184,150,0.85)';
-      ctx.fillText(label, 0, -10 / this.zoom);
+      // Fundo do label
+      const pad = 4 / this.zoom;
+      ctx.fillStyle = 'rgba(26,24,20,0.82)';
+      ctx.beginPath();
+      ctx.roundRect(-tw / 2 - pad, yOff - fs - pad, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
+      ctx.fill();
+      ctx.fillStyle = sel ? '#C9A84C' : '#D4C8A8';
+      ctx.fillText(label, 0, yOff);
       ctx.restore();
     }
   },
