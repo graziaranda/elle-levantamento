@@ -1645,20 +1645,24 @@ const CanvasEditor = {
   // Abre painel lateral deslizante (sem backdrop) para porta/janela.
   // O canvas continua visível — a prévia ao vivo e o ponto verde aparecem na planta.
   _openSidePanel(html) {
-    this._closeSidePanel();   // fecha eventual painel anterior
+    // Remove painel anterior IMEDIATAMENTE (sem timeout) para evitar conflito de ID
+    const prev = document.getElementById('opening-panel');
+    if (prev) prev.remove();
+
     const el = document.createElement('div');
     el.className = 'opening-panel';
     el.id = 'opening-panel';
     el.innerHTML = html;
     document.body.appendChild(el);
     requestAnimationFrame(() => el.classList.add('visible'));
+    return el; // retorna referência direta — nunca usar getElementById depois
   },
 
   _closeSidePanel() {
     const el = document.getElementById('opening-panel');
     if (!el) return;
     el.classList.remove('visible');
-    setTimeout(() => el.remove(), 230);
+    setTimeout(() => { if (el.parentNode) el.remove(); }, 230);
   },
 
   // ── Instalação ancorada à parede ─────────────────────────────────────────
@@ -1766,7 +1770,7 @@ const CanvasEditor = {
         ${entries.map(e => `<button class="install-btn ${catCss(cat)}" data-type="${e.id}">${esc(e.label)}</button>`).join('')}
       </div>`).join('');
 
-    this._openSidePanel(`
+    const panel = this._openSidePanel(`
       <div class="op-header">
         <span class="op-title">Inserir instalação</span>
         <button class="op-close" id="op-x">
@@ -1857,7 +1861,6 @@ const CanvasEditor = {
       // Listeners do passo 2 via event delegation no painel
     };
 
-    const panel = document.getElementById('opening-panel');
     if (!panel) return;
 
     panel.addEventListener('pointerup', e => {
@@ -1968,7 +1971,7 @@ const CanvasEditor = {
         ${opts.map(o => `<button type="button" data-val="${o.v}" class="${o.v === data[name] ? 'active' : ''}">${o.t}</button>`).join('')}
       </div>`;
 
-    this._openSidePanel(`
+    const panelEl = this._openSidePanel(`
       <div class="op-header">
         <span class="op-title">${isDoor ? 'Nova porta' : 'Nova janela'}</span>
         <button class="op-close" id="op-x">
@@ -2062,16 +2065,14 @@ const CanvasEditor = {
       Toast.show(isDoor ? 'Porta inserida' : 'Janela inserida', 'success');
     };
 
-    // Listeners de input (campos de texto)
-    const panel = document.getElementById('opening-panel');
+    // Usa panelEl (referência direta do _openSidePanel) — nunca getElementById
+    const panel = panelEl;
     if (!panel) return;
 
     ['op-width', 'op-dist', 'op-height', 'op-sill'].forEach(id => {
       panel.querySelector(`#${id}`)?.addEventListener('input', sync);
     });
 
-    // Event delegation no painel — 1 listener para todos os botões.
-    // Mais robusto que listeners individuais em mobile (evita swallow de eventos).
     panel.addEventListener('pointerup', e => {
       const btn = e.target.closest('button');
       if (!btn) return;
