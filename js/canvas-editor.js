@@ -1534,7 +1534,27 @@ const CanvasEditor = {
     }
   },
 
-  // Formulário de porta/janela: largura + distância do canto + prévia ao vivo.
+  // Abre painel lateral deslizante (sem backdrop) para porta/janela.
+  // O canvas continua visível — a prévia ao vivo e o ponto verde aparecem na planta.
+  _openSidePanel(html) {
+    this._closeSidePanel();   // fecha eventual painel anterior
+    const el = document.createElement('div');
+    el.className = 'opening-panel';
+    el.id = 'opening-panel';
+    el.innerHTML = html;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('visible'));
+  },
+
+  _closeSidePanel() {
+    const el = document.getElementById('opening-panel');
+    if (!el) return;
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 230);
+  },
+
+  // Formulário de porta/janela no painel lateral.
+  // Canvas permanece visível → prévia ao vivo e ponto verde aparecem na planta.
   _openOpeningForm(type, wall, position) {
     const isDoor  = type === 'door';
     const cm      = mm => Math.round(mm / 10);
@@ -1544,7 +1564,6 @@ const CanvasEditor = {
       ? { width: 800,  height: 2100, hingeSide: 'right', openDir: 'in' }
       : { width: 1200, height: 1000, sill: 1000 };
     data.fromEnd = 'start';
-    // distância (canto → borda do vão) a partir do ponto tocado
     const centerMm = Math.max(0, Math.min(wallLen, position * wallLen));
     data.distCm = Math.max(0, Math.round((centerMm - data.width / 2) / 10));
 
@@ -1563,18 +1582,22 @@ const CanvasEditor = {
         ${opts.map(o => `<button type="button" data-val="${o.v}" class="${o.v === data[name] ? 'active' : ''}">${o.t}</button>`).join('')}
       </div>`;
 
-    Modal.open(`
-      <div class="modal-header">
-        <h2 class="modal-title">${isDoor ? 'Nova porta' : 'Nova janela'}</h2>
-        <button class="modal-close" id="mc"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg></button>
+    this._openSidePanel(`
+      <div class="op-header">
+        <span class="op-title">${isDoor ? 'Nova porta' : 'Nova janela'}</span>
+        <button class="op-close" id="op-x">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
       </div>
-      <div class="modal-body">
-        <p style="font-size:11px;color:var(--text-muted);margin:0 0 12px;display:flex;align-items:center;gap:6px;">
-          <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#5A9A70;"></span>
-          Medida a partir do canto verde · veja a prévia na planta
-        </p>
+      <div class="op-ref-hint">
+        <span class="op-ref-dot"></span>
+        Canto verde na planta = referência das medidas
+      </div>
+      <div class="op-body">
         ${numField('width', 'Largura (vão)', cm(data.width))}
-        ${numField('dist', 'Distância do canto até o vão', data.distCm)}
+        ${numField('dist',  'Distância do canto até o vão', data.distCm)}
         <button type="button" class="op-flip" id="op-flip">⇄ Medir a partir do outro canto</button>
         ${numField('height', 'Altura', cm(data.height))}
         ${!isDoor ? numField('sill', 'Peitoril (piso até a janela)', cm(data.sill)) : ''}
@@ -1588,18 +1611,17 @@ const CanvasEditor = {
             ${seg('openDir', [{ v: 'in', t: 'Dentro' }, { v: 'out', t: 'Fora' }])}
           </div>` : ''}
       </div>
-      <div class="modal-footer">
-        <button class="btn-ghost" id="mc-cancel">Cancelar</button>
-        <button class="btn-primary" id="mc-save">${isDoor ? 'Inserir porta' : 'Inserir janela'}</button>
+      <div class="op-footer">
+        <button class="btn-ghost" id="op-cancel">Cancelar</button>
+        <button class="btn-primary" id="op-save" style="flex:1;">${isDoor ? 'Inserir porta' : 'Inserir janela'}</button>
       </div>
     `);
 
     const readCm = id => {
-      const v = parseFloat((document.getElementById(id)?.value || '').replace(',', '.'));
+      const v = parseLocaleFloat((document.getElementById(id)?.value || ''));
       return isNaN(v) ? 0 : Math.round(v * 10);
     };
 
-    // Converte os campos atuais numa posição (fração 0..1 do centro do vão)
     const computePosition = () => {
       const width = readCm('op-width') || 1;
       const distM = readCm('op-dist');
@@ -1611,7 +1633,6 @@ const CanvasEditor = {
       return wallLen > 0 ? centerFromStart / wallLen : 0.5;
     };
 
-    // Atualiza a prévia ao vivo na planta
     const sync = () => {
       const pos = computePosition();
       this._openingPreview = {
@@ -1621,36 +1642,39 @@ const CanvasEditor = {
         sill: isDoor ? null : readCm('op-sill'),
         hingeSide: data.hingeSide, openDir: data.openDir, side: data.hingeSide,
       };
-      // marca o canto de referência
       const ref = data.fromEnd === 'start' ? { x: wall.x1, y: wall.y1 } : { x: wall.x2, y: wall.y2 };
       this._placingOpening = { wallId: wall.id, refX: ref.x, refY: ref.y };
       this._draw();
     };
 
     ['op-width', 'op-dist', 'op-height', 'op-sill'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener('input', sync);
+      document.getElementById(id)?.addEventListener('input', sync);
     });
     document.getElementById('op-flip').addEventListener('click', () => {
       data.fromEnd = data.fromEnd === 'start' ? 'end' : 'start';
+      // Atualiza placeholder do hint de referência
+      const hint = document.querySelector('.op-ref-hint');
+      if (hint) hint.lastChild.textContent =
+        ` Canto ${data.fromEnd === 'start' ? 'inicial' : 'final'} (verde) = referência`;
       sync();
     });
-    document.querySelectorAll('.op-seg').forEach(segEl => {
+    document.querySelectorAll('.op-seg').forEach(segEl =>
       segEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
         segEl.querySelectorAll('button').forEach(x => x.classList.remove('active'));
         b.classList.add('active');
         data[segEl.dataset.seg] = b.dataset.val;
         sync();
-      }));
-    });
+      }))
+    );
 
-    sync();  // prévia inicial
+    sync();  // prévia inicial — o ponto verde aparece na planta imediatamente
 
     const clearPreview = () => { this._openingPreview = null; this._placingOpening = null; };
-    const closeForm = () => { clearPreview(); Modal.close(); this._draw(); };
-    document.getElementById('mc').addEventListener('click', closeForm);
-    document.getElementById('mc-cancel').addEventListener('click', closeForm);
-    document.getElementById('mc-save').addEventListener('click', () => {
+    const closeForm = () => { clearPreview(); this._closeSidePanel(); this._draw(); };
+
+    document.getElementById('op-x').addEventListener('click', closeForm);
+    document.getElementById('op-cancel').addEventListener('click', closeForm);
+    document.getElementById('op-save').addEventListener('click', () => {
       const width = readCm('op-width');
       if (!width || width <= 0) { Toast.show('Informe a largura', 'error'); return; }
       const opening = {
@@ -1668,9 +1692,9 @@ const CanvasEditor = {
       this._pushHistory();
       this.project.canvas.openings.push(opening);
       clearPreview();
+      this._closeSidePanel();
       this._scheduleSave();
       this._draw();
-      Modal.close();
       Toast.show(isDoor ? 'Porta inserida' : 'Janela inserida', 'success');
     });
   },
