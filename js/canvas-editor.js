@@ -553,22 +553,23 @@ const CanvasEditor = {
       candidates.push({ x: cx,             y: cy,             label: 'Centro' });
     }
 
-    // Pontos de instalação
+    // Pontos de instalação — prioridade máxima (0): snap direto no ponto, sem "Face"
     for (const inst of c.installations) {
       const entry = getInstallEntry(inst.type);
       const sym   = entry ? entry.symbol : '?';
-      candidates.push({ x: inst.x, y: inst.y, label: sym });
+      candidates.push({ x: inst.x, y: inst.y, label: sym, priority: 0 });
     }
 
-    // Encontrar o mais próximo dentro do raio
-    // Prioridade 1 = eixo/canto (mais preciso), 2 = face (offset da espessura)
-    // Entre mesma prioridade: menor distância vence. Face só vence se mais perto.
+    // Encontrar o mais próximo dentro do raio com sistema de prioridade:
+    // 0 = instalação (melhor — snap exato, sem "Face")
+    // 1 = face de parede
+    // Instalação ganha sobre face mesmo se um pouco mais distante (bônus -8px)
     let best = null, bestScore = Infinity;
     for (const pt of candidates) {
       const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
       if (d >= R) continue;
-      // Score: distância ponderada pela prioridade (prioridade 1 tem desconto de 5px)
-      const score = d + (pt.priority === 2 ? 5 / this.zoom : 0);
+      // Penalidade de 8px para face quando há instalação competindo
+      const score = d + (pt.priority === 0 ? -8 / this.zoom : 0);
       if (score < bestScore) { bestScore = score; best = pt; }
     }
 
