@@ -2828,22 +2828,32 @@ const CanvasEditor = {
   },
 
   // ── Snap magnético para cotas ─────────────────────────────────────────────
-  // Captura pontos estratégicos do levantamento com raio generoso (20px).
-  // Pontos capturados: cantos de parede, meios de parede, bordas de vão,
-  // centro de vão, posições de instalação.
-  // Retorna { x, y, label } ou null se nenhum ponto próximo.
+  // Captura pontos estratégicos com raio 20px.
+  // Para paredes: além dos eixos (centro), também as FACES (±espessura/2)
+  // perpendicularmente, para cotas internas e externas corretas.
   _snapToArchPoint(rawWorld) {
-    const R  = 20 / this.zoom;   // raio de captura em mm (20px de tela)
+    const R  = 20 / this.zoom;
     const c  = this.project.canvas;
     const candidates = [];
 
-    // Cantos e meios de cada parede
     for (const w of c.walls) {
-      candidates.push({ x: w.x1, y: w.y1, label: 'Canto' });
-      candidates.push({ x: w.x2, y: w.y2, label: 'Canto' });
-      candidates.push({
-        x: (w.x1 + w.x2) / 2, y: (w.y1 + w.y2) / 2, label: 'Meio'
-      });
+      const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const len = Math.sqrt(dx*dx + dy*dy);
+      if (!len) continue;
+      const nx = -dy / len, ny = dx / len; // normal perpendicular à parede
+      const t  = (w.thickness || 150) / 2; // metade da espessura
+
+      // Pontos no EIXO da parede (centerline)
+      for (const [px, py, lbl] of [
+        [w.x1, w.y1, 'Eixo'],
+        [w.x2, w.y2, 'Eixo'],
+        [(w.x1+w.x2)/2, (w.y1+w.y2)/2, 'Meio'],
+      ]) {
+        candidates.push({ x: px, y: py, label: lbl, priority: 1 });
+        // FACE interna e externa (perpendicular ao eixo)
+        candidates.push({ x: px + nx*t, y: py + ny*t, label: 'Face', priority: 2 });
+        candidates.push({ x: px - nx*t, y: py - ny*t, label: 'Face', priority: 2 });
+      }
     }
 
     // Bordas e centro de cada abertura (porta/janela)
@@ -2869,13 +2879,18 @@ const CanvasEditor = {
     }
 
     // Encontrar o mais próximo dentro do raio
-    let best = null, bestD = Infinity;
+    // Prioridade 1 = eixo/canto (mais preciso), 2 = face (offset da espessura)
+    // Entre mesma prioridade: menor distância vence. Face só vence se mais perto.
+    let best = null, bestScore = Infinity;
     for (const pt of candidates) {
       const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
-      if (d < R && d < bestD) { bestD = d; best = pt; }
+      if (d >= R) continue;
+      // Score: distância ponderada pela prioridade (prioridade 1 tem desconto de 5px)
+      const score = d + (pt.priority === 2 ? 5 / this.zoom : 0);
+      if (score < bestScore) { bestScore = score; best = pt; }
     }
 
-    return best; // null = nenhum snap arquitetônico
+    return best;
   },
 
   // ── Main draw ─────────────────────────────
