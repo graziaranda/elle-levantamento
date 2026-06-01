@@ -895,11 +895,14 @@ const CanvasEditor = {
   // ── Openings ─────────────────────────────
 
   _drawOpenings(ctx) {
-    for (const o of this.project.canvas.openings) this._drawSingleOpening(ctx, o, false);
+    for (const o of this.project.canvas.openings) {
+      const sel = this.selected?.id === o.id;
+      this._drawSingleOpening(ctx, o, false, sel);
+    }
   },
 
   // Desenha uma porta/janela. preview=true → estilo translúcido (ainda no formulário)
-  _drawSingleOpening(ctx, o, preview) {
+  _drawSingleOpening(ctx, o, preview, sel = false) {
     const w = this.project.canvas.walls.find(w => w.id === o.wallId);
     if (!w) return;
 
@@ -988,31 +991,34 @@ const CanvasEditor = {
       }
     }
 
-    // Label discreto largura × altura — só no preview (durante o formulário)
-    // Confirma visualmente as medidas que a arquiteta está digitando
-    if (preview && o.width) {
+    // Label largura × altura — sempre visível (preview=grande, inserido=pequeno)
+    if (o.width) {
       const wCm = Math.round((o.width  || 0) / 10);
       const hCm = o.height ? Math.round(o.height / 10) : null;
       const sill = (!isDoor && o.sill) ? Math.round(o.sill / 10) : null;
       const line1 = hCm ? `${wCm}×${hCm}cm` : `${wCm}cm`;
       const line2 = sill ? `peit. ${sill}cm` : null;
 
-      const fs   = 11 / this.zoom;
-      const offY = -(w.thickness || 150) / 2 - 18 / this.zoom;
+      // preview: label maior (12px) fora da parede; inserido: label menor (10px) no vão
+      const fs   = preview ? (12 / this.zoom) : (10 / this.zoom);
+      const offY = preview
+        ? -(w.thickness || 150) / 2 - 18 / this.zoom   // acima da parede
+        : -(w.thickness || 150) * 0.1;                  // dentro do vão
+
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(Math.atan2(dy, dx));
-      ctx.font      = `600 ${fs}px Inter,sans-serif`;
+      ctx.font      = `${preview ? '600' : '500'} ${fs}px Inter,sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
 
-      // Fundo
       const tw = ctx.measureText(line1).width;
-      ctx.fillStyle = 'rgba(26,24,20,0.75)';
+      const alpha = preview ? 0.75 : 0.65;
+      ctx.fillStyle = `rgba(26,24,20,${alpha})`;
       ctx.beginPath();
       ctx.roundRect(-tw/2 - 4/this.zoom, offY - fs - 2/this.zoom, tw + 8/this.zoom, fs + 4/this.zoom, 3/this.zoom);
       ctx.fill();
-      ctx.fillStyle = '#C9A84C';
+      ctx.fillStyle = preview ? '#C9A84C' : (sel ? '#C9A84C' : 'rgba(200,184,150,0.9)');
       ctx.fillText(line1, 0, offY);
 
       if (line2) {
