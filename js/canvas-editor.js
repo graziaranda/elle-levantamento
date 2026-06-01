@@ -1078,10 +1078,54 @@ const CanvasEditor = {
 
   // ── Preview (rubber-band) ─────────────────
 
+  // Linhas de projeção: mostra guias tracejadas quando o endpoint atual
+  // se alinha horizontal ou verticalmente com endpoints existentes.
+  _drawProjectionLines(ctx, x2, y2) {
+    const TOL = 8 / this.zoom;  // tolerância de alinhamento em mm (8px)
+    const walls = this.project.canvas.walls;
+    const W = this.canvas.width / this.zoom;
+    const H = this.canvas.height / this.zoom;
+    const ox = -this.panX / this.zoom;
+    const oy = -this.panY / this.zoom;
+
+    ctx.save();
+    ctx.setLineDash([80 / this.zoom, 50 / this.zoom]);
+    ctx.lineWidth = 1 / this.zoom;
+
+    for (const w of walls) {
+      for (const pt of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
+        // Alinhamento vertical (mesmo X)
+        if (Math.abs(pt.x - x2) < TOL && Math.abs(pt.y - y2) > TOL * 2) {
+          ctx.strokeStyle = 'rgba(201,168,76,0.4)';
+          ctx.beginPath();
+          ctx.moveTo(pt.x, oy);
+          ctx.lineTo(pt.x, oy + H);
+          ctx.stroke();
+        }
+        // Alinhamento horizontal (mesmo Y)
+        if (Math.abs(pt.y - y2) < TOL && Math.abs(pt.x - x2) > TOL * 2) {
+          ctx.strokeStyle = 'rgba(201,168,76,0.4)';
+          ctx.beginPath();
+          ctx.moveTo(ox,     pt.y);
+          ctx.lineTo(ox + W, pt.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    ctx.setLineDash([]);
+    ctx.restore();
+  },
+
   _drawPreview(ctx) {
     if (!this.drawStart || !this.mouseWorld) return;
     const { x: x1, y: y1 } = this.drawStart;
     const { x: x2, y: y2 } = this.mouseWorld;
+
+    // Linhas de projeção para paredes (alinhamento com endpoints existentes)
+    if (this.currentTool === 'wall' && this._aiming) {
+      this._drawProjectionLines(ctx, x2, y2);
+    }
 
     if (this.currentTool === 'wall') {
       ctx.strokeStyle = 'rgba(201,168,76,0.65)';

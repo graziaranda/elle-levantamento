@@ -33,7 +33,16 @@ const App = {
 // ── Modal ─────────────────────────────────
 
 const Modal = {
+  _closeTimer: null,
+
   open(html) {
+    // Cancelar qualquer timer de close pendente — evita que o cleanup
+    // de um modal anterior apague este (ex: numpad fecha e ambiente abre logo depois)
+    if (this._closeTimer) {
+      clearTimeout(this._closeTimer);
+      this._closeTimer = null;
+    }
+
     const root = document.getElementById('modal-root');
     root.innerHTML = `
       <div class="modal-backdrop" id="modal-backdrop">
@@ -44,7 +53,7 @@ const Modal = {
       if (e.target.id === 'modal-backdrop') this.close();
     });
     requestAnimationFrame(() => {
-      root.querySelector('.modal-backdrop').classList.add('visible');
+      root.querySelector('.modal-backdrop')?.classList.add('visible');
     });
   },
 
@@ -53,7 +62,10 @@ const Modal = {
     const bd   = root.querySelector('.modal-backdrop');
     if (!bd) return;
     bd.classList.remove('visible');
-    setTimeout(() => { root.innerHTML = ''; }, 210);
+    this._closeTimer = setTimeout(() => {
+      root.innerHTML = '';
+      this._closeTimer = null;
+    }, 210);
   },
 };
 

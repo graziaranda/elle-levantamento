@@ -3409,10 +3409,54 @@ const CanvasEditor = {
 
   // ── Preview (rubber-band) ─────────────────
 
+  // Linhas de projeção: mostra guias tracejadas quando o endpoint atual
+  // se alinha horizontal ou verticalmente com endpoints existentes.
+  _drawProjectionLines(ctx, x2, y2) {
+    const TOL = 8 / this.zoom;  // tolerância de alinhamento em mm (8px)
+    const walls = this.project.canvas.walls;
+    const W = this.canvas.width / this.zoom;
+    const H = this.canvas.height / this.zoom;
+    const ox = -this.panX / this.zoom;
+    const oy = -this.panY / this.zoom;
+
+    ctx.save();
+    ctx.setLineDash([80 / this.zoom, 50 / this.zoom]);
+    ctx.lineWidth = 1 / this.zoom;
+
+    for (const w of walls) {
+      for (const pt of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
+        // Alinhamento vertical (mesmo X)
+        if (Math.abs(pt.x - x2) < TOL && Math.abs(pt.y - y2) > TOL * 2) {
+          ctx.strokeStyle = 'rgba(201,168,76,0.4)';
+          ctx.beginPath();
+          ctx.moveTo(pt.x, oy);
+          ctx.lineTo(pt.x, oy + H);
+          ctx.stroke();
+        }
+        // Alinhamento horizontal (mesmo Y)
+        if (Math.abs(pt.y - y2) < TOL && Math.abs(pt.x - x2) > TOL * 2) {
+          ctx.strokeStyle = 'rgba(201,168,76,0.4)';
+          ctx.beginPath();
+          ctx.moveTo(ox,     pt.y);
+          ctx.lineTo(ox + W, pt.y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    ctx.setLineDash([]);
+    ctx.restore();
+  },
+
   _drawPreview(ctx) {
     if (!this.drawStart || !this.mouseWorld) return;
     const { x: x1, y: y1 } = this.drawStart;
     const { x: x2, y: y2 } = this.mouseWorld;
+
+    // Linhas de projeção para paredes (alinhamento com endpoints existentes)
+    if (this.currentTool === 'wall' && this._aiming) {
+      this._drawProjectionLines(ctx, x2, y2);
+    }
 
     if (this.currentTool === 'wall') {
       ctx.strokeStyle = 'rgba(201,168,76,0.65)';
@@ -6127,7 +6171,16 @@ const App = {
 // ── Modal ─────────────────────────────────
 
 const Modal = {
+  _closeTimer: null,
+
   open(html) {
+    // Cancelar qualquer timer de close pendente — evita que o cleanup
+    // de um modal anterior apague este (ex: numpad fecha e ambiente abre logo depois)
+    if (this._closeTimer) {
+      clearTimeout(this._closeTimer);
+      this._closeTimer = null;
+    }
+
     const root = document.getElementById('modal-root');
     root.innerHTML = `
       <div class="modal-backdrop" id="modal-backdrop">
@@ -6138,7 +6191,7 @@ const Modal = {
       if (e.target.id === 'modal-backdrop') this.close();
     });
     requestAnimationFrame(() => {
-      root.querySelector('.modal-backdrop').classList.add('visible');
+      root.querySelector('.modal-backdrop')?.classList.add('visible');
     });
   },
 
@@ -6147,7 +6200,10 @@ const Modal = {
     const bd   = root.querySelector('.modal-backdrop');
     if (!bd) return;
     bd.classList.remove('visible');
-    setTimeout(() => { root.innerHTML = ''; }, 210);
+    this._closeTimer = setTimeout(() => {
+      root.innerHTML = '';
+      this._closeTimer = null;
+    }, 210);
   },
 };
 
