@@ -1022,7 +1022,9 @@ kbd {
   box-shadow: -6px 0 24px rgba(0,0,0,0.55);
   display: flex;
   flex-direction: column;
-  z-index: 300;
+  z-index: 400;                /* acima de qualquer elemento do editor */
+  touch-action: manipulation;  /* resposta imediata sem delay de 300ms */
+  pointer-events: all;
   transform: translateX(100%);
   transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   overflow-y: auto;

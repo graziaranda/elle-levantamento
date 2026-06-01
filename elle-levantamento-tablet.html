@@ -1034,7 +1034,9 @@ kbd {
   box-shadow: -6px 0 24px rgba(0,0,0,0.55);
   display: flex;
   flex-direction: column;
-  z-index: 300;
+  z-index: 400;                /* acima de qualquer elemento do editor */
+  touch-action: manipulation;  /* resposta imediata sem delay de 300ms */
+  pointer-events: all;
   transform: translateX(100%);
   transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   overflow-y: auto;
@@ -3976,34 +3978,12 @@ const CanvasEditor = {
       this._draw();
     };
 
-    ['op-width', 'op-dist', 'op-height', 'op-sill'].forEach(id => {
-      document.getElementById(id)?.addEventListener('input', sync);
-    });
-    document.getElementById('op-flip').addEventListener('click', () => {
-      data.fromEnd = data.fromEnd === 'start' ? 'end' : 'start';
-      // Atualiza placeholder do hint de referência
-      const hint = document.querySelector('.op-ref-hint');
-      if (hint) hint.lastChild.textContent =
-        ` Canto ${data.fromEnd === 'start' ? 'inicial' : 'final'} (verde) = referência`;
-      sync();
-    });
-    document.querySelectorAll('.op-seg').forEach(segEl =>
-      segEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-        segEl.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-        b.classList.add('active');
-        data[segEl.dataset.seg] = b.dataset.val;
-        sync();
-      }))
-    );
-
-    sync();  // prévia inicial — o ponto verde aparece na planta imediatamente
+    sync();  // prévia inicial — ponto verde aparece na planta imediatamente
 
     const clearPreview = () => { this._openingPreview = null; this._placingOpening = null; };
-    const closeForm = () => { clearPreview(); this._closeSidePanel(); this._draw(); };
+    const closeForm    = () => { clearPreview(); this._closeSidePanel(); this._draw(); };
 
-    document.getElementById('op-x').addEventListener('click', closeForm);
-    document.getElementById('op-cancel').addEventListener('click', closeForm);
-    document.getElementById('op-save').addEventListener('click', () => {
+    const saveOpening = () => {
       const width = readCm('op-width');
       if (!width || width <= 0) { Toast.show('Informe a largura', 'error'); return; }
       const opening = {
@@ -4025,6 +4005,42 @@ const CanvasEditor = {
       this._scheduleSave();
       this._draw();
       Toast.show(isDoor ? 'Porta inserida' : 'Janela inserida', 'success');
+    };
+
+    // Listeners de input (campos de texto)
+    const panel = document.getElementById('opening-panel');
+    if (!panel) return;
+
+    ['op-width', 'op-dist', 'op-height', 'op-sill'].forEach(id => {
+      panel.querySelector(`#${id}`)?.addEventListener('input', sync);
+    });
+
+    // Event delegation no painel — 1 listener para todos os botões.
+    // Mais robusto que listeners individuais em mobile (evita swallow de eventos).
+    panel.addEventListener('pointerup', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.stopPropagation();
+
+      const id  = btn.id;
+      const seg = btn.closest('.op-seg');
+
+      if (id === 'op-x' || id === 'op-cancel') { closeForm(); return; }
+      if (id === 'op-save')                     { saveOpening(); return; }
+      if (id === 'op-flip') {
+        data.fromEnd = data.fromEnd === 'start' ? 'end' : 'start';
+        const hint = panel.querySelector('.op-ref-hint');
+        if (hint) hint.lastChild.textContent =
+          ` Canto ${data.fromEnd === 'start' ? 'inicial' : 'final'} (verde) = referência`;
+        sync();
+        return;
+      }
+      if (seg) {
+        seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
+        btn.classList.add('active');
+        data[seg.dataset.seg] = btn.dataset.val;
+        sync();
+      }
     });
   },
 
