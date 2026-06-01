@@ -2369,6 +2369,7 @@ const CanvasEditor = {
   _aimAngle:   null,   // ângulo travado durante o arraste
   _aimClosing: false,  // mira está fechando no 1º ponto
   _snapBadge:  null,   // string do ângulo travado exibida no preview (C-07)
+  _archSnapPt: null,   // ponto arquitetônico capturado pelo snap magnético de cota
 
   // Inserção de porta/janela arrastando até a parede
   _placingOpening: null,  // { type, wallId, position, cx, cy } | null
@@ -2683,6 +2684,7 @@ const CanvasEditor = {
     this._placingInstall = null;
     this._aimingInstall  = false;
     this._installPreview = null;
+    this._archSnapPt     = null;
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -2773,6 +2775,57 @@ const CanvasEditor = {
     return { x, y, snapped: false };
   },
 
+  // ── Snap magnético para cotas ─────────────────────────────────────────────
+  // Captura pontos estratégicos do levantamento com raio generoso (20px).
+  // Pontos capturados: cantos de parede, meios de parede, bordas de vão,
+  // centro de vão, posições de instalação.
+  // Retorna { x, y, label } ou null se nenhum ponto próximo.
+  _snapToArchPoint(rawWorld) {
+    const R  = 20 / this.zoom;   // raio de captura em mm (20px de tela)
+    const c  = this.project.canvas;
+    const candidates = [];
+
+    // Cantos e meios de cada parede
+    for (const w of c.walls) {
+      candidates.push({ x: w.x1, y: w.y1, label: 'Canto' });
+      candidates.push({ x: w.x2, y: w.y2, label: 'Canto' });
+      candidates.push({
+        x: (w.x1 + w.x2) / 2, y: (w.y1 + w.y2) / 2, label: 'Meio'
+      });
+    }
+
+    // Bordas e centro de cada abertura (porta/janela)
+    for (const o of c.openings) {
+      const w = c.walls.find(w => w.id === o.wallId);
+      if (!w) continue;
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (!len) continue;
+      const nx = dx / len, ny = dy / len;
+      const cx = w.x1 + dx * o.position, cy = w.y1 + dy * o.position;
+      const half = (o.width || 900) / 2;
+      candidates.push({ x: cx - nx * half, y: cy - ny * half, label: 'Vão' });
+      candidates.push({ x: cx + nx * half, y: cy + ny * half, label: 'Vão' });
+      candidates.push({ x: cx,             y: cy,             label: 'Centro' });
+    }
+
+    // Pontos de instalação
+    for (const inst of c.installations) {
+      const entry = getInstallEntry(inst.type);
+      const sym   = entry ? entry.symbol : '?';
+      candidates.push({ x: inst.x, y: inst.y, label: sym });
+    }
+
+    // Encontrar o mais próximo dentro do raio
+    let best = null, bestD = Infinity;
+    for (const pt of candidates) {
+      const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
+      if (d < R && d < bestD) { bestD = d; best = pt; }
+    }
+
+    return best; // null = nenhum snap arquitetônico
+  },
+
   // ── Main draw ─────────────────────────────
 
   _draw() {
@@ -2804,6 +2857,7 @@ const CanvasEditor = {
     if (this._openingPreview) this._layer('previa-abertura', () => this._drawSingleOpening(ctx, this._openingPreview, true));
     if (this._placingInstall) this._layer('alvo-install',  () => this._drawInstallPlacement(ctx));
     if (this._installPreview) this._layer('previa-install', () => this._drawInstallPreview(ctx));
+    if (this._archSnapPt)     this._layer('snap-arch',      () => this._drawArchSnap(ctx));
     if (this.drawStart) this._layer('preview', () => this._drawPreview(ctx));
     if (this.currentTool === 'environment') this._layer('preview-amb', () => this._drawEnvPreview(ctx));
 
@@ -3501,7 +3555,7 @@ const CanvasEditor = {
     }
 
     switch (this.currentTool) {
-      case 'dimension':   this._clickDim(world);    break;
+      case 'dimension':   this._clickDim(raw);      break; // raw para snap arquitetônico
       case 'install':     this._clickInstall(world); break;
       case 'photo':       this._clickPhoto(world);   break;
       case 'note':        this._clickNote(world);    break;
@@ -3526,6 +3580,15 @@ const CanvasEditor = {
     if (this._aimingOpening) { this._openingAim(raw); return; }
 
     this.mouseWorld = this._snapWorld(raw, e.shiftKey);
+
+    // Snap magnético de cota: atualiza indicador em tempo real
+    if (this.currentTool === 'dimension') {
+      this._archSnapPt = this._snapToArchPoint(raw);
+      if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
+    } else {
+      this._archSnapPt = null;
+    }
+
     this._draw();
   },
 
@@ -3828,20 +3891,57 @@ const CanvasEditor = {
     });
   },
 
-  _clickDim(world) {
+  // Indicador visual de snap arquitetônico: cruz amarela + label do ponto capturado
+  _drawArchSnap(ctx) {
+    const pt = this._archSnapPt;
+    if (!pt) return;
+    const r = 14 / this.zoom;
+    const c = 5  / this.zoom;
+
+    // Círculo externo pulsante
+    ctx.strokeStyle = 'rgba(255,220,50,0.6)';
+    ctx.lineWidth   = 1.5 / this.zoom;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, r * 1.6, 0, Math.PI * 2); ctx.stroke();
+
+    // Cruz interna dourada
+    ctx.strokeStyle = '#FFDC32';
+    ctx.lineWidth   = 2 / this.zoom;
+    ctx.beginPath();
+    ctx.moveTo(pt.x - r, pt.y); ctx.lineTo(pt.x + r, pt.y);
+    ctx.moveTo(pt.x, pt.y - r); ctx.lineTo(pt.x, pt.y + r);
+    ctx.stroke();
+
+    // Label do ponto (ex: "Canto", "Vão", "Meio")
+    if (pt.label) {
+      const fs = 11 / this.zoom;
+      ctx.font = `600 ${fs}px Inter,sans-serif`;
+      ctx.fillStyle = '#FFDC32';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(pt.label, pt.x, pt.y - r - 3 / this.zoom);
+      ctx.textBaseline = 'alphabetic';
+    }
+  },
+
+  _clickDim(rawWorld) {
+    // Snap magnético para cotas: captura pontos arquitetônicos estratégicos
+    const snapped = this._snapToArchPoint(rawWorld) || rawWorld;
+    this._archSnapPt = null; // limpa indicador após clique
+
     if (!this.drawStart) {
-      this.drawStart = world;
+      this.drawStart = snapped;
       this._updateCancelBtn();
-      Toast.show('Ponto inicial da cota marcado — toque no ponto final', 'info', 3000);
+      Toast.show('Ponto inicial marcado — toque no ponto final', 'info', 2500);
     } else {
-      const len = dist(this.drawStart.x, this.drawStart.y, world.x, world.y);
+      const len = dist(this.drawStart.x, this.drawStart.y, snapped.x, snapped.y);
       if (len > 10) {
         this._pushHistory();
         this.project.canvas.dimensions.push({
           id: generateId(),
           x1: this.drawStart.x, y1: this.drawStart.y,
-          x2: world.x,          y2: world.y,
+          x2: snapped.x,        y2: snapped.y,
           value: null, offset: 400,
+          wallId: null, label: null,
         });
         this._scheduleSave();
       }
@@ -5190,6 +5290,14 @@ const CanvasEditor = {
 
       this.mouseWorld = this._snapWorld(raw, false);
 
+      // Snap magnético de cota no touch move
+      if (this.currentTool === 'dimension') {
+        this._archSnapPt = this._snapToArchPoint(raw);
+        if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
+      } else {
+        this._archSnapPt = null;
+      }
+
       // Selecionar: arrasto com 1 dedo move o mapa
       if (this.currentTool === 'select') {
         const dx = e.touches[0].clientX - this._touches[0].clientX;
@@ -5290,7 +5398,7 @@ const CanvasEditor = {
 
       if (isTap) {
         if (!this._handleScaleCalibClick(world)) switch (this.currentTool) {
-          case 'dimension':   this._clickDim(world);                   break;
+          case 'dimension':   this._clickDim(raw);                     break;
           case 'install':     this._clickInstall(world);               break;
           case 'photo':       this._clickPhoto(world);                 break;
           case 'note':        this._clickNote(world);                  break;
