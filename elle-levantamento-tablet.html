@@ -3463,7 +3463,7 @@ const CanvasEditor = {
       ctx.strokeStyle = 'rgba(201,168,76,0.65)';
       ctx.lineWidth   = 150;
       ctx.lineCap     = 'square';
-      ctx.setLineDash([500 / this.zoom, 200 / this.zoom]);
+      ctx.setLineDash([25 / this.zoom, 10 / this.zoom]); // dash ~25px, gap ~10px na tela
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -4188,12 +4188,14 @@ const CanvasEditor = {
     this._openOpeningForm(pl.type, wall, pl.position);
   },
 
-  // Realça a parede alvo + marca o canto de referência da medida
+  // Realça a parede alvo + marca o canto de referência + mostra cota de distância
   _drawOpeningPlacement(ctx) {
     const pl = this._placingOpening;
     if (!pl) return;
     const w = this.project.canvas.walls.find(w => w.id === pl.wallId);
     if (!w) return;
+
+    // Parede realçada
     ctx.save();
     ctx.globalAlpha = 0.3;
     ctx.strokeStyle = '#C9A84C';
@@ -4201,11 +4203,67 @@ const CanvasEditor = {
     ctx.lineCap     = 'round';
     ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
     ctx.restore();
-    // Canto de referência (de onde a distância é medida)
-    if (pl.refX != null) {
-      ctx.fillStyle = '#5A9A70';
-      ctx.beginPath(); ctx.arc(pl.refX, pl.refY, 11 / this.zoom, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
+
+    // Canto de referência — ponto verde = de onde a distância é medida
+    const refX = pl.refX ?? w.x1;
+    const refY = pl.refY ?? w.y1;
+    // Halo
+    ctx.strokeStyle = 'rgba(90,154,112,0.4)';
+    ctx.lineWidth   = 1.5 / this.zoom;
+    ctx.beginPath(); ctx.arc(refX, refY, 16 / this.zoom, 0, Math.PI * 2); ctx.stroke();
+    // Disco sólido
+    ctx.fillStyle = '#5A9A70';
+    ctx.beginPath(); ctx.arc(refX, refY, 10 / this.zoom, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
+
+    // Se houver prévia de abertura, desenhar cota de distância do canto até a borda do vão
+    if (this._openingPreview) {
+      const o    = this._openingPreview;
+      const dx   = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const wlen = Math.sqrt(dx * dx + dy * dy);
+      if (!wlen) return;
+      const nx = dx / wlen, ny = dy / wlen;
+      // Borda do vão mais próxima do canto de referência
+      const cx   = w.x1 + dx * o.position;
+      const cy   = w.y1 + dy * o.position;
+      const half = (o.width || 800) / 2;
+      const edgeX = cx - nx * half;  // borda inicial do vão
+      const edgeY = cy - ny * half;
+
+      // Linha de cota tracejada do canto até a borda do vão
+      const offPerp = { x: -ny * (w.thickness || 150) * 0.8, y: nx * (w.thickness || 150) * 0.8 };
+      ctx.save();
+      ctx.strokeStyle = '#5A9A70';
+      ctx.lineWidth   = 1.5 / this.zoom;
+      ctx.setLineDash([12 / this.zoom, 6 / this.zoom]);
+      ctx.beginPath();
+      ctx.moveTo(refX + offPerp.x, refY + offPerp.y);
+      ctx.lineTo(edgeX + offPerp.x, edgeY + offPerp.y);
+      ctx.stroke();
+      // Ticks nas extremidades
+      ctx.setLineDash([]);
+      for (const [px, py] of [[refX, refY], [edgeX, edgeY]]) {
+        const r = 5 / this.zoom;
+        ctx.beginPath();
+        ctx.moveTo(px + offPerp.x - (-ny) * r, py + offPerp.y - nx * r);
+        ctx.lineTo(px + offPerp.x + (-ny) * r, py + offPerp.y + nx * r);
+        ctx.stroke();
+      }
+      // Label de distância
+      const distMm = dist(refX, refY, edgeX, edgeY);
+      const distLabel = distMm >= 1000
+        ? `${(distMm / 1000).toFixed(2)}m`
+        : `${Math.round(distMm)}mm`;
+      const mx2  = (refX + edgeX) / 2 + offPerp.x * 1.4;
+      const my2  = (refY + edgeY) / 2 + offPerp.y * 1.4;
+      const fs2  = 12 / this.zoom;
+      ctx.font       = `600 ${fs2}px Inter,sans-serif`;
+      ctx.fillStyle  = '#5A9A70';
+      ctx.textAlign  = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(distLabel, mx2, my2);
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
     }
   },
 
