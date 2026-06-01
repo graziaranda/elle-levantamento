@@ -14,6 +14,7 @@ const DxfWriter = {
 
     this._header(L, bbox);
     this._tables(L, c);
+    this._blocks(L, c);   // seção BLOCKS com blocos anônimos das cotas
     this._entities(L, c);
     L.push('0', 'EOF');
 
@@ -187,14 +188,17 @@ const DxfWriter = {
   },
 
   // ── Dimensões (cotas) ─────────────────────────
-  // Gera geometria visual de cota (linhas + texto).
-  // Fase futura: gerar entidade DIMENSION nativa para AutoCAD associativo.
+  // Gera entidade DIMENSION nativa (AC1015 = AutoCAD R2000).
+  // A entidade referencia um bloco anônimo *Dn que contém a geometria visual
+  // como fallback para viewers que não processam DIMENSION nativamente.
 
   _writeDimensions(L, c) {
-    for (const d of (c.dimensions || [])) {
+    const dims = c.dimensions || [];
+    for (let i = 0; i < dims.length; i++) {
+      const d = dims[i];
       const measuredMm = Math.sqrt((d.x2 - d.x1) ** 2 + (d.y2 - d.y1) ** 2);
       const val = (d.value != null) ? d.value : Math.round(measuredMm);
-      this._dimension(L, d, val);
+      this._dimEntity(L, d, val, i + 1);
     }
   },
 
@@ -305,37 +309,128 @@ const DxfWriter = {
     );
   },
 
-  // Cota geométrica: linha + extensoras + ticks + texto.
-  // Fase futura: substituir por entidade DIMENSION nativa (AC1015 suporta).
-  _dimension(L, d, valueMm) {
+  // Entidade DIMENSION nativa DXF R2000 (AC1015) — tipo 1 = aligned linear.
+  // n: índice 1-based para nomear o bloco anônimo (*D1, *D2, ...).
+  //
+  // Grupos de código usados:
+  //   100 AcDbEntity + AcDbDimension + AcDbAlignedDimension
+  //   2  → nome do bloco anônimo com a geometria visual (fallback)
+  //   10/20 → ponto do texto (inserção, espaço DXF Y-up)
+  //   11/21 → ponto do texto (coincide com 10/20 para aligned)
+  //   70  → flags: 1 = aligned linear
+  //   1   → texto sobreposto (vazio = auto); usa label se definido
+  //   42  → medida real em mm (usada pelo AutoCAD para verificar texto sobreposto)
+  //   13/23 → ponto de definição 1 (xdef1, espaço DXF)
+  //   14/24 → ponto de definição 2 (xdef2, espaço DXF)
+  _dimEntity(L, d, valueMm, n) {
     const dx = d.x2 - d.x1, dy = d.y2 - d.y1;
-    const lenPx = Math.sqrt(dx * dx + dy * dy);
-    if (!lenPx) return;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (!len) return;
 
-    const nx = dx / lenPx, ny = dy / lenPx;
-    const perp = { x: -ny, y: nx };
     const off  = d.offset || 400;
+    const nx = dx / len, ny = dy / len;
+    const perp = { x: -ny, y: nx };
+
+    // Pontos no espaço DXF (Y invertido: dxfY = -canvasY)
+    const x1d  = d.x1,           y1d = -d.y1;
+    const x2d  = d.x2,           y2d = -d.y2;
+    const p1dx = d.x1 + perp.x * off, p1dy = -(d.y1 + perp.y * off);
+    const p2dx = d.x2 + perp.x * off, p2dy = -(d.y2 + perp.y * off);
+    const txd  = (p1dx + p2dx) / 2;   // midpoint da linha de cota (AutoCAD posiciona o texto)
+    const tyd  = (p1dy + p2dy) / 2;
+
+    const blockName = `*D${n}`;
+    const labelText = d.label ? String(d.label) : '';   // vazio = AutoCAD usa a medida automática
+
+    L.push(
+      '0', 'DIMENSION',
+      '100', 'AcDbEntity',
+      '8',   'COTAS',
+      '100', 'AcDbDimension',
+      '2',   blockName,           // bloco anônimo com geometria visual (fallback)
+      '10',  txd.toFixed(1), '20', tyd.toFixed(1), '30', '0',
+      '11',  txd.toFixed(1), '21', tyd.toFixed(1), '31', '0',
+      '70',  '1',                 // 1 = aligned linear
+      '1',   labelText,           // texto sobreposto (vazio = usa 42 automaticamente)
+      '42',  valueMm.toFixed(1),  // valor real em mm
+      '100', 'AcDbAlignedDimension',
+      '13',  x1d.toFixed(1), '23', y1d.toFixed(1), '33', '0',
+      '14',  x2d.toFixed(1), '24', y2d.toFixed(1), '34', '0'
+    );
+  },
+
+  // Seção BLOCKS — blocos anônimos com geometria visual das cotas.
+  // Viewers que não processam a entidade DIMENSION usam o bloco como fallback.
+  _blocks(L, c) {
+    L.push('0', 'SECTION', '2', 'BLOCKS');
+
+    // Bloco MODEL_SPACE obrigatório em AC1015
+    L.push(
+      '0', 'BLOCK', '2', '*Model_Space', '70', '0',
+      '10', '0', '20', '0', '30', '0', '3', '', '1', '',
+      '0', 'ENDBLK'
+    );
+    L.push(
+      '0', 'BLOCK', '2', '*Paper_Space', '70', '0',
+      '10', '0', '20', '0', '30', '0', '3', '', '1', '',
+      '0', 'ENDBLK'
+    );
+
+    // Um bloco por cota
+    const dims = c.dimensions || [];
+    for (let i = 0; i < dims.length; i++) {
+      const d = dims[i];
+      const n = i + 1;
+      const measuredMm = Math.sqrt((d.x2 - d.x1) ** 2 + (d.y2 - d.y1) ** 2);
+      const val = (d.value != null) ? d.value : Math.round(measuredMm);
+      this._dimBlock(L, d, val, n);
+    }
+
+    L.push('0', 'ENDSEC');
+  },
+
+  // Bloco anônimo *Dn — contém a geometria visual (fallback) da cota n.
+  // Mesmo algoritmo do antigo _dimension(), usando coordenadas relativas à origem do bloco.
+  _dimBlock(L, d, valueMm, n) {
+    const dx = d.x2 - d.x1, dy = d.y2 - d.y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (!len) return;
+
+    const off  = d.offset || 400;
+    const nx = dx / len, ny = dy / len;
+    const perp = { x: -ny, y: nx };
 
     const p1 = { x: d.x1 + perp.x * off, y: d.y1 + perp.y * off };
     const p2 = { x: d.x2 + perp.x * off, y: d.y2 + perp.y * off };
+    const mx  = (p1.x + p2.x) / 2 + perp.x * 100;
+    const my  = (p1.y + p2.y) / 2 + perp.y * 100;
+    const labelText = d.label || fmtMm(valueMm);
+    const tick = 80;
 
+    L.push(
+      '0', 'BLOCK',
+      '2',   `*D${n}`,
+      '70',  '4',    // 4 = anonymous block (flag)
+      '10',  '0', '20', '0', '30', '0',
+      '3',   '', '1', ''
+    );
+
+    // Linha de cota
     this._line(L, 'COTAS', p1.x, p1.y, p2.x, p2.y);
+    // Linhas de extensão
     this._line(L, 'COTAS', d.x1, d.y1, p1.x, p1.y);
     this._line(L, 'COTAS', d.x2, d.y2, p2.x, p2.y);
-
-    const tick = 80;
+    // Ticks
     for (const pt of [p1, p2]) {
       this._line(L, 'COTAS',
         pt.x - perp.x * tick, pt.y - perp.y * tick,
         pt.x + perp.x * tick, pt.y + perp.y * tick
       );
     }
+    // Texto
+    this._text(L, 'COTAS', mx, my, labelText, 200);
 
-    // Formata o valor: usa fmtMm() de data.js para consistência
-    const labelText = d.label || fmtMm(valueMm);
-    const mx = (p1.x + p2.x) / 2;
-    const my = (p1.y + p2.y) / 2;
-    this._text(L, 'COTAS', mx + perp.x * 100, my + perp.y * 100, labelText, 200);
+    L.push('0', 'ENDBLK');
   },
 
   // ── Export ────────────────────────────────────
