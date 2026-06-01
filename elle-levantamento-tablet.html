@@ -2375,6 +2375,11 @@ const CanvasEditor = {
   _aimingOpening:  false,
   _openingPreview: null,  // abertura em edição (prévia ao vivo no formulário)
 
+  // Inserção de instalação arrastando até a parede (igual à abertura)
+  _placingInstall: null,  // { wallId, wallT, refX, refY } | null
+  _aimingInstall:  false,
+  _installPreview: null,  // { x, y, type } para prévia ao vivo
+
   // Scale calibration state: null | { p1: {x,y} }
   _scaleTool: null,
 
@@ -2675,6 +2680,9 @@ const CanvasEditor = {
     this._placingOpening = null;
     this._aimingOpening  = false;
     this._openingPreview = null;
+    this._placingInstall = null;
+    this._aimingInstall  = false;
+    this._installPreview = null;
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -2794,6 +2802,8 @@ const CanvasEditor = {
     this._layer('notas',         () => this._drawNotes(ctx));
     if (this._placingOpening) this._layer('alvo-abertura', () => this._drawOpeningPlacement(ctx));
     if (this._openingPreview) this._layer('previa-abertura', () => this._drawSingleOpening(ctx, this._openingPreview, true));
+    if (this._placingInstall) this._layer('alvo-install',  () => this._drawInstallPlacement(ctx));
+    if (this._installPreview) this._layer('previa-install', () => this._drawInstallPreview(ctx));
     if (this.drawStart) this._layer('preview', () => this._drawPreview(ctx));
     if (this.currentTool === 'environment') this._layer('preview-amb', () => this._drawEnvPreview(ctx));
 
@@ -3452,7 +3462,12 @@ const CanvasEditor = {
       return;
     }
 
-    // Porta/janela: arrasta até a parede (realça em tempo real)
+    // Porta/janela/instalação: arrasta até a parede
+    if (this.currentTool === 'install') {
+      this._aimingInstall = true;
+      this._installAim(raw);
+      return;
+    }
     if (this.currentTool === 'door' || this.currentTool === 'window') {
       this._aimingOpening = true;
       this._openingAim(raw);
@@ -3481,6 +3496,7 @@ const CanvasEditor = {
     }
 
     if (this.currentTool === 'wall' && this._aiming) { this._wallAim(raw); return; }
+    if (this._aimingInstall)  { this._installAim(raw); return; }
     if (this._aimingOpening) { this._openingAim(raw); return; }
 
     this.mouseWorld = this._snapWorld(raw, e.shiftKey);
@@ -3494,6 +3510,7 @@ const CanvasEditor = {
       return;
     }
     if (this.currentTool === 'wall' && this._aiming) { this._wallCommit(); return; }
+    if (this._aimingInstall) { this._aimingInstall = false; this._installCommit(); return; }
     if (this._aimingOpening) { this._openingCommit(); }
   },
 
@@ -3961,6 +3978,246 @@ const CanvasEditor = {
     if (!el) return;
     el.classList.remove('visible');
     setTimeout(() => el.remove(), 230);
+  },
+
+  // ── Instalação ancorada à parede ─────────────────────────────────────────
+  // Fluxo idêntico à abertura: arraste → parede acende → formulário lateral
+  // com tipo + distância do canto + altura → ponto salvo com wallId/wallT.
+
+  _installAim(rawWorld) {
+    let bestWall = null, bestT = 0, bestDist = Infinity;
+    for (const w of this.project.canvas.walls) {
+      const { t, d } = projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+      if (d < bestDist && t >= 0 && t <= 1) { bestDist = d; bestWall = w; bestT = t; }
+    }
+    if (bestWall && bestDist <= 700 / this.zoom) {
+      const refX = bestWall.x1 + (bestWall.x2 - bestWall.x1) * bestT;
+      const refY = bestWall.y1 + (bestWall.y2 - bestWall.y1) * bestT;
+      this._placingInstall = { wallId: bestWall.id, wallT: bestT, refX, refY };
+    } else {
+      this._placingInstall = null;
+    }
+    this._draw();
+  },
+
+  _installCommit() {
+    const pl = this._placingInstall;
+    if (!pl) { Toast.show('Arraste até uma parede para inserir', 'info'); this._draw(); return; }
+    const wall = this.project.canvas.walls.find(w => w.id === pl.wallId);
+    if (!wall) { this._placingInstall = null; this._draw(); return; }
+    this._openInstallForm(wall, pl.wallT);
+  },
+
+  _drawInstallPlacement(ctx) {
+    const pl = this._placingInstall;
+    if (!pl) return;
+    const w = this.project.canvas.walls.find(w => w.id === pl.wallId);
+    if (!w) return;
+    // Realça a parede
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.strokeStyle = '#5B9BD5';
+    ctx.lineWidth   = (w.thickness || 150) + 70 / this.zoom;
+    ctx.lineCap     = 'round';
+    ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
+    ctx.restore();
+    // Ponto azul na posição
+    if (pl.refX != null) {
+      ctx.fillStyle = '#5B9BD5';
+      ctx.beginPath(); ctx.arc(pl.refX, pl.refY, 12 / this.zoom, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
+    }
+  },
+
+  _drawInstallPreview(ctx) {
+    const p = this._installPreview;
+    if (!p) return;
+    const entry = getInstallEntry(p.type);
+    const color = entry ? entry.color : '#5B9BD5';
+    const r = 180;
+    ctx.strokeStyle = color;
+    ctx.fillStyle   = 'rgba(26,24,20,0.65)';
+    ctx.lineWidth   = 2.5 / this.zoom;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    const code = this._instCode(p.type);
+    const fs   = 13 / this.zoom;
+    ctx.font      = `700 ${fs}px Inter,sans-serif`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(code, p.x, p.y);
+    ctx.textBaseline = 'alphabetic';
+    ctx.globalAlpha = 1;
+  },
+
+  // Formulário de instalação no painel lateral.
+  // Passo 1: grade de tipos. Passo 2: distância do canto + altura.
+  _openInstallForm(wall, wallT) {
+    const available  = getAvailableInstallTypes(this.project);
+    const wallLen    = dist(wall.x1, wall.y1, wall.x2, wall.y2);
+    const catLabel   = cat => ({ eletrica:'Elétrica', hidraulica:'Hidráulica / Gás', odonto:'Odontológico', restaurante:'Restaurante' }[cat] || cat);
+    const catCss     = cat => ({ eletrica:'electric', hidraulica:'hydro', odonto:'odonto', restaurante:'restaurante' }[cat] || 'electric');
+
+    const byCategory = {};
+    for (const e of available) {
+      if (!byCategory[e.category]) byCategory[e.category] = [];
+      byCategory[e.category].push(e);
+    }
+
+    // Passo 1: selecionar tipo
+    const sectionsHtml = Object.entries(byCategory).map(([cat, entries]) => `
+      <div class="modal-section">${catLabel(cat)}</div>
+      <div class="install-grid">
+        ${entries.map(e => `<button class="install-btn ${catCss(cat)}" data-type="${e.id}">${esc(e.label)}</button>`).join('')}
+      </div>`).join('');
+
+    this._openSidePanel(`
+      <div class="op-header">
+        <span class="op-title">Inserir instalação</span>
+        <button class="op-close" id="op-x">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="op-ref-hint">
+        <span class="op-ref-dot" style="background:#5B9BD5;"></span>
+        Ponto azul na planta = posição atual
+      </div>
+      <div class="op-body" id="install-body">
+        ${sectionsHtml}
+      </div>
+      <div class="op-footer" id="install-footer" style="display:none;">
+        <button class="btn-ghost" id="inst-back" style="font-size:11px;">← Tipos</button>
+        <button class="btn-primary" id="inst-confirm" style="flex:1;">Inserir</button>
+      </div>
+    `);
+
+    let selectedType = null;
+    let fromEnd = 'start';
+
+    const clearPreview = () => { this._installPreview = null; this._placingInstall = null; };
+    const closeForm    = () => { clearPreview(); this._closeSidePanel(); this._draw(); };
+
+    const syncPreview = (type, distCm) => {
+      if (!type) return;
+      const entry  = getInstallEntry(type);
+      const dMm    = parseLocaleFloat(String(distCm)) * 10;
+      const t      = fromEnd === 'start' ? dMm / wallLen : (wallLen - dMm) / wallLen;
+      const tClamped = Math.max(0, Math.min(1, t));
+      const px = wall.x1 + (wall.x2 - wall.x1) * tClamped;
+      const py = wall.y1 + (wall.y2 - wall.y1) * tClamped;
+      this._installPreview = { x: px, y: py, type };
+      // Atualiza o ponto azul
+      this._placingInstall = { wallId: wall.id, wallT: tClamped, refX: px, refY: py };
+      this._draw();
+    };
+
+    // Passo 2: ao selecionar o tipo, mostrar distância + altura
+    const showStep2 = (type) => {
+      selectedType = type;
+      const entry    = getInstallEntry(type) || { label: type, defaultHeight: null };
+      const defH     = entry.defaultHeight != null ? String(entry.defaultHeight) : '';
+      const distCm   = Math.round(wallT * wallLen / 10); // distância inicial em cm
+
+      document.getElementById('install-body').innerHTML = `
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;">${esc(entry.label)}</div>
+        <div class="form-group">
+          <label class="form-label">Distância do canto até o ponto (cm)</label>
+          <div class="op-input-wrap">
+            <input class="form-input op-num" id="inst-dist" inputmode="decimal" type="text" value="${distCm}">
+            <span class="op-unit">cm</span>
+          </div>
+        </div>
+        <button type="button" class="op-flip" id="inst-flip">⇄ Medir a partir do outro canto</button>
+        <div class="form-group">
+          <label class="form-label">Altura do piso (cm)</label>
+          <div class="op-input-wrap">
+            <input class="form-input op-num" id="inst-height" inputmode="decimal" type="text"
+              value="${defH}" placeholder="${entry.defaultHeight != null ? 'padrão: ' + entry.defaultHeight : '—'}">
+            <span class="op-unit">cm</span>
+          </div>
+        </div>
+      `;
+      const footer = document.getElementById('install-footer');
+      if (footer) footer.style.display = '';
+
+      syncPreview(type, distCm);
+
+      // Listeners do passo 2 via event delegation no painel
+    };
+
+    const panel = document.getElementById('opening-panel');
+    if (!panel) return;
+
+    panel.addEventListener('pointerup', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.stopPropagation();
+
+      if (btn.id === 'op-x')    { closeForm(); return; }
+      if (btn.id === 'inst-back') {
+        // Volta para a grade de tipos
+        selectedType = null;
+        this._installPreview = null;
+        document.getElementById('install-body').innerHTML = sectionsHtml;
+        const f = document.getElementById('install-footer');
+        if (f) f.style.display = 'none';
+        this._draw();
+        return;
+      }
+
+      if (btn.classList.contains('install-btn')) {
+        showStep2(btn.dataset.type);
+        return;
+      }
+
+      if (btn.id === 'inst-flip') {
+        fromEnd = fromEnd === 'start' ? 'end' : 'start';
+        const hint = panel.querySelector('.op-ref-hint');
+        if (hint) hint.lastChild.textContent =
+          ` Canto ${fromEnd === 'start' ? 'inicial' : 'final'} = referência`;
+        const d = panel.querySelector('#inst-dist');
+        if (d) syncPreview(selectedType, d.value);
+        return;
+      }
+
+      if (btn.id === 'inst-confirm') {
+        if (!selectedType) { Toast.show('Selecione o tipo', 'error'); return; }
+        const dEl = panel.querySelector('#inst-dist');
+        const hEl = panel.querySelector('#inst-height');
+        const dMm = parseLocaleFloat((dEl?.value || '0')) * 10;
+        const t   = fromEnd === 'start' ? dMm / wallLen : (wallLen - dMm) / wallLen;
+        const tC  = Math.max(0, Math.min(1, t));
+        const px  = wall.x1 + (wall.x2 - wall.x1) * tC;
+        const py  = wall.y1 + (wall.y2 - wall.y1) * tC;
+
+        const inst = createInstallation(selectedType, px, py, this.project.canvas);
+        inst.wallId = wall.id;
+        inst.wallT  = tC;
+        const hVal  = parseLocaleFloatOrNull(hEl?.value || '');
+        inst.height = hVal !== null ? Math.round(hVal) : inst.height;
+
+        this._pushHistory();
+        this.project.canvas.installations.push(inst);
+        clearPreview();
+        this._closeSidePanel();
+        this._scheduleSave();
+        this._draw();
+        const entry = getInstallEntry(selectedType);
+        Toast.show(`${entry ? entry.label : selectedType} inserido`, 'success');
+        return;
+      }
+    });
+
+    // Input sync para prévia ao vivo
+    panel.addEventListener('input', e => {
+      if (e.target.id === 'inst-dist' && selectedType) {
+        syncPreview(selectedType, e.target.value);
+      }
+    });
+
   },
 
   // Formulário de porta/janela no painel lateral.
@@ -4914,6 +5171,16 @@ const CanvasEditor = {
       if (this.currentTool === 'door' || this.currentTool === 'window') {
         this._openingAim(raw);
         this._openingCommit();
+        this._touches       = Array.from(e.touches);
+        this._touchStartPos = null;
+        return;
+      }
+
+      // Instalação: confirma a parede sob o dedo e abre o formulário
+      if (this.currentTool === 'install') {
+        this._installAim(raw);
+        this._aimingInstall = false;
+        this._installCommit();
         this._touches       = Array.from(e.touches);
         this._touchStartPos = null;
         return;
