@@ -1992,17 +1992,62 @@ const DxfWriter = {
   // ── Paredes ───────────────────────────────────
 
   _writeWalls(L, c) {
-    for (const w of (c.walls || [])) {
+    const walls = c.walls || [];
+    const openings = c.openings || [];
+    const SNAP = 20; // tolerância de conexão em mm
+
+    // Verifica se um endpoint conecta a outra parede
+    const isConn = (w, px, py) =>
+      walls.some(o => o !== w && (
+        (Math.abs(o.x1 - px) < SNAP && Math.abs(o.y1 - py) < SNAP) ||
+        (Math.abs(o.x2 - px) < SNAP && Math.abs(o.y2 - py) < SNAP)
+      ));
+
+    for (const w of walls) {
       const t = (w.thickness || 150) / 2;
       const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx * dx + dy * dy);
       if (!len) continue;
-      const nx = -dy / len * t, ny = dx / len * t;
+      const ux = dx / len, uy = dy / len; // unitário ao longo
+      const nx = -uy * t, ny = ux * t;    // offset perpendicular
 
-      this._line(L, 'PAREDES', w.x1 + nx, w.y1 + ny, w.x2 + nx, w.y2 + ny);
-      this._line(L, 'PAREDES', w.x1 - nx, w.y1 - ny, w.x2 - nx, w.y2 - ny);
-      this._line(L, 'PAREDES', w.x1 + nx, w.y1 + ny, w.x1 - nx, w.y1 - ny);
-      this._line(L, 'PAREDES', w.x2 + nx, w.y2 + ny, w.x2 - nx, w.y2 - ny);
+      // Aberturas desta parede — para cortar as linhas de face
+      const wOpenings = openings
+        .filter(o => o.wallId === w.id)
+        .map(o => ({
+          s: len * o.position - (o.width || 900) / 2,
+          e: len * o.position + (o.width || 900) / 2,
+        }))
+        .sort((a, b) => a.s - b.s);
+
+      // Desenha segmentos de uma face, pulando os vãos
+      const drawFace = (ox, oy) => {
+        let cur = 0;
+        for (const vao of wOpenings) {
+          if (vao.s > cur) {
+            this._line(L, 'PAREDES',
+              w.x1 + ux * cur + ox,  w.y1 + uy * cur + oy,
+              w.x1 + ux * vao.s + ox, w.y1 + uy * vao.s + oy);
+          }
+          cur = vao.e;
+        }
+        if (cur < len) {
+          this._line(L, 'PAREDES',
+            w.x1 + ux * cur + ox, w.y1 + uy * cur + oy,
+            w.x2 + ox, w.y2 + oy);
+        }
+      };
+
+      drawFace( nx,  ny);
+      drawFace(-nx, -ny);
+
+      // Tampa no início: só se livre (não conecta a outra parede)
+      if (!isConn(w, w.x1, w.y1))
+        this._line(L, 'PAREDES', w.x1 + nx, w.y1 + ny, w.x1 - nx, w.y1 - ny);
+
+      // Tampa no fim: só se livre
+      if (!isConn(w, w.x2, w.y2))
+        this._line(L, 'PAREDES', w.x2 + nx, w.y2 + ny, w.x2 - nx, w.y2 - ny);
     }
   },
 
@@ -2030,12 +2075,14 @@ const DxfWriter = {
         const geo = this._doorGeometry(cx, cy, nx, ny, o);
         this._arc(L, 'ABERTURAS', geo.hx, geo.hy, o.width || 900, geo.startDeg, geo.sweepDeg);
       } else {
-        // Janela: linha tripla
-        const perpX = -ny * 40, perpY = nx * 40;
-        for (const k of [-1, 0, 1]) {
+        // Janela: 3 linhas perpendiculares à parede (representando o vidro)
+        const t = (w.thickness || 150) / 2;
+        const perpX = -ny, perpY = nx; // unitário perpendicular à parede
+        for (const k of [-half * 0.5, 0, half * 0.5]) {
+          const ox = cx + nx * k, oy = cy + ny * k;
           this._line(L, 'ABERTURAS',
-            cx - nx * half + perpX * k, cy - ny * half + perpY * k,
-            cx + nx * half + perpX * k, cy + ny * half + perpY * k
+            ox + perpX * t, oy + perpY * t,
+            ox - perpX * t, oy - perpY * t
           );
         }
       }
@@ -2046,25 +2093,16 @@ const DxfWriter = {
   // Compartilha a lógica com canvas-editor._drawSingleOpening para garantir
   // que o arco no DXF bate com o arco na tela.
   _doorGeometry(cx, cy, nx, ny, o) {
-    const side = (o.hingeSide === 'left' || o.side === 'left') ? 1 : -1;
-    const half  = (o.width || 900) / 2;
-
-    // Ponto da dobradiça (extremidade da parede onde fica a dobradiça)
-    const hx = cx + nx * half * (side > 0 ? -1 : 1);
-    const hy = cy + ny * half * (side > 0 ? -1 : 1);
-
-    // Direção perpendicular (define para qual lado abre)
+    const side     = (o.hingeSide === 'left' || o.side === 'left') ? 1 : -1;
+    const half     = (o.width || 900) / 2;
+    const hx       = cx - nx * half * side;
+    const hy       = cy - ny * half * side;
     const openSide = (o.openDir === 'out') ? -side : side;
-    const perpX = -ny * openSide;
-    const perpY =  nx * openSide;
-
-    // Ângulo base em graus (no espaço DXF: Y invertido)
-    // atan2 no espaço canvas → inverte ny para DXF
-    const baseAngleDeg = Math.atan2(-perpY, perpX) * 180 / Math.PI;
-    const startDeg = baseAngleDeg;
-    const sweepDeg = 90;
-
-    return { hx, hy, startDeg, sweepDeg };
+    const perpX    = -ny * openSide;
+    const perpY    =  nx * openSide;
+    // Ângulo no sistema canvas (Y↓); a inversão é tratada em _arc
+    const startDeg = Math.atan2(perpY, perpX) * 180 / Math.PI;
+    return { hx, hy, startDeg, sweepDeg: 90 };
   },
 
   // ── Dimensões (cotas) ─────────────────────────
@@ -2184,15 +2222,19 @@ const DxfWriter = {
     );
   },
 
-  // startAngle e sweepAngle em graus, no espaço DXF (Y-up).
+  // startAngle e sweepAngle em graus, no espaço canvas (Y↓).
+  // Converte para DXF (Y↑): espelha ângulos em torno do eixo X.
   _arc(L, layer, cx, cy, r, startAngle, sweepAngle) {
-    const endAngle = startAngle + sweepAngle;
+    // Espelhamento Y inverte sentido angular: canvas CCW → DXF CW
+    // Para manter CCW no DXF: dxfStart = -(start+sweep), dxfEnd = -start
+    const dxfStart = ((-startAngle - sweepAngle) % 360 + 360) % 360;
+    const dxfEnd   = ((-startAngle)              % 360 + 360) % 360;
     L.push(
       '0', 'ARC', '8', layer,
       '10', cx.toFixed(1), '20', (-cy).toFixed(1), '30', '0',
       '40', r.toFixed(1),
-      '50', startAngle.toFixed(2),
-      '51', endAngle.toFixed(2)
+      '50', dxfStart.toFixed(2),
+      '51', dxfEnd.toFixed(2)
     );
   },
 
