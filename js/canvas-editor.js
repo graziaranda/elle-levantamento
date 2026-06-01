@@ -748,11 +748,32 @@ const CanvasEditor = {
       if (pts.length >= 2) chains.push({ pts, thickness: w.thickness || 150, sel: this.selected?.id === w.id });
     }
 
-    // 3. Desenhar cada cadeia como único path
-    // lineJoin:'round' elimina notches/gaps em QUALQUER ângulo (diagonal, agudo, obtuso).
-    // O arredondamento (raio = espessura/2) é mínimo na escala de planta.
-    ctx.lineCap  = 'round';
-    ctx.lineJoin = 'round';
+    // 3a. Disco nos endpoints conectados — preenchido ANTES das paredes.
+    // Cobre o V-notch interno gerado pelo lineJoin:miter em ângulos não-90°.
+    // Por ficar embaixo das paredes (mesma cor), só aparece no gap interno.
+    const epFill = new Map();
+    for (const w of walls) {
+      const t = w.thickness || 150;
+      for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
+        const k = epKey(px, py);
+        if (!epFill.has(k)) epFill.set(k, { x: px, y: py, t, n: 0 });
+        const ep = epFill.get(k);
+        ep.n++;
+        if (t > ep.t) ep.t = t;
+      }
+    }
+    ctx.fillStyle = '#F0EBE0';
+    for (const ep of epFill.values()) {
+      if (ep.n < 2) continue;
+      ctx.beginPath();
+      ctx.arc(ep.x, ep.y, ep.t * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 3b. Paredes como paths conectados com cantos vivos (miter) — padrão de planta baixa
+    ctx.lineCap    = 'square';
+    ctx.lineJoin   = 'miter';
+    ctx.miterLimit = 10;
 
     for (const chain of chains) {
       ctx.strokeStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
@@ -765,7 +786,7 @@ const CanvasEditor = {
       // Fechar o loop se o último ponto coincidir com o primeiro (ambiente fechado)
       const p0 = chain.pts[0], pN = chain.pts[chain.pts.length - 1];
       const closeD = Math.sqrt((pN.x - p0.x) ** 2 + (pN.y - p0.y) ** 2);
-      if (closeD < 25) ctx.closePath(); // ≤ 25mm → loop fechado
+      if (closeD < 25) ctx.closePath();
       ctx.stroke();
     }
 
