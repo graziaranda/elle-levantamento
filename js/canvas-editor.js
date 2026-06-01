@@ -995,7 +995,7 @@ const CanvasEditor = {
     if (o.width) {
       const wCm = Math.round((o.width  || 0) / 10);
       const hCm = o.height ? Math.round(o.height / 10) : null;
-      const sill = (!isDoor && o.sill) ? Math.round(o.sill / 10) : null;
+      const sill = (o.type !== 'door' && o.sill) ? Math.round(o.sill / 10) : null;
       const line1 = hCm ? `${wCm}×${hCm}cm` : `${wCm}cm`;
       const line2 = sill ? `peit. ${sill}cm` : null;
 
