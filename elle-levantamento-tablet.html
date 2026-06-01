@@ -4457,21 +4457,50 @@ const CanvasEditor = {
       if (d < bestDist && t >= 0 && t <= 1) { bestDist = d; bestWall = w; bestT = t; }
     }
     if (bestWall && bestDist <= 700 / this.zoom) {
-      // Referência = canto mais próximo da parede (start ou end), não onde o dedo soltou.
-      // O ponto azul fica sempre fixo num canto — só muda ao ⇄ para o outro canto.
       const wl  = dist(bestWall.x1, bestWall.y1, bestWall.x2, bestWall.y2);
       const dS  = dist(rawWorld.x, rawWorld.y, bestWall.x1, bestWall.y1);
       const dE  = dist(rawWorld.x, rawWorld.y, bestWall.x2, bestWall.y2);
       const nearStart = dS <= dE;
       this._placingInstall = {
+        mode: 'wall',
         wallId:     bestWall.id,
         wallT:      bestT,
         nearStart,
-        // ponto azul = canto fixo (start ou end)
         refX: nearStart ? bestWall.x1 : bestWall.x2,
         refY: nearStart ? bestWall.y1 : bestWall.y2,
-        // distância inicial = onde o dedo soltou (pré-preenchimento conveniente)
         initDistCm: Math.round((nearStart ? bestT * wl : (1 - bestT) * wl) / 10),
+      };
+    } else if (this.project.canvas.walls.length >= 2) {
+      // Modo PISO: toque longe das paredes → amarra em duas paredes (X + Y)
+      // Encontrar parede mais próxima horizontal e vertical
+      const walls = this.project.canvas.walls;
+      let wallH = null, distH = Infinity; // parede mais próxima em Y (horizontal)
+      let wallV = null, distV = Infinity; // parede mais próxima em X (vertical)
+
+      for (const w of walls) {
+        const dx = Math.abs(w.x2 - w.x1), dy = Math.abs(w.y2 - w.y1);
+        const len = Math.sqrt(dx*dx + dy*dy);
+        if (!len) continue;
+        const { d } = projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+        const angle = Math.atan2(Math.abs(dy), Math.abs(dx)); // 0=horiz, 90=vert
+        if (angle < Math.PI / 4) { // parede mais horizontal → referência Y
+          if (d < distH) { distH = d; wallH = w; }
+        } else {                   // parede mais vertical → referência X
+          if (d < distV) { distV = d; wallV = w; }
+        }
+      }
+
+      this._placingInstall = {
+        mode:    'floor',
+        floorX:  rawWorld.x,
+        floorY:  rawWorld.y,
+        refX:    rawWorld.x,
+        refY:    rawWorld.y,
+        wallH,   // parede referência Y (horizontal)
+        wallV,   // parede referência X (vertical)
+        // Distâncias da face de cada parede até o ponto tocado
+        initDistX: wallV ? Math.max(0, Math.round((Math.abs(rawWorld.x - (wallV.x1+wallV.x2)/2) - (wallV.thickness||150)/2) / 10)) : 0,
+        initDistY: wallH ? Math.max(0, Math.round((Math.abs(rawWorld.y - (wallH.y1+wallH.y2)/2) - (wallH.thickness||150)/2) / 10)) : 0,
       };
     } else {
       this._placingInstall = null;
@@ -4481,10 +4510,14 @@ const CanvasEditor = {
 
   _installCommit() {
     const pl = this._placingInstall;
-    if (!pl) { Toast.show('Arraste até uma parede para inserir', 'info'); this._draw(); return; }
-    const wall = this.project.canvas.walls.find(w => w.id === pl.wallId);
-    if (!wall) { this._placingInstall = null; this._draw(); return; }
-    this._openInstallForm(wall, pl.wallT);
+    if (!pl) { Toast.show('Arraste até uma parede ou toque no piso', 'info'); this._draw(); return; }
+    if (pl.mode === 'floor') {
+      this._openInstallFormFloor(pl);
+    } else {
+      const wall = this.project.canvas.walls.find(w => w.id === pl.wallId);
+      if (!wall) { this._placingInstall = null; this._draw(); return; }
+      this._openInstallForm(wall, pl.wallT);
+    }
   },
 
   _drawInstallPlacement(ctx) {
@@ -4568,6 +4601,154 @@ const CanvasEditor = {
       ctx.beginPath(); ctx.arc(refX, refY, 11 / this.zoom, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
     }
+  },
+
+  // Formulário de instalação NO PISO — amarração em duas paredes (X + Y)
+  _openInstallFormFloor(pl) {
+    const available = getAvailableInstallTypes(this.project);
+    const byCategory = {};
+    for (const e of available) {
+      if (!byCategory[e.category]) byCategory[e.category] = [];
+      byCategory[e.category].push(e);
+    }
+    const catLabel = c => ({ eletrica:'Elétrica', hidraulica:'Hidráulica / Gás', odonto:'Odontológico', restaurante:'Restaurante' }[c] || c);
+    const catCss   = c => ({ eletrica:'electric', hidraulica:'hydro', odonto:'odonto', restaurante:'restaurante' }[c] || 'electric');
+    const sectionsHtml = Object.entries(byCategory).map(([cat, entries]) => `
+      <div class="modal-section">${catLabel(cat)}</div>
+      <div class="install-grid">
+        ${entries.map(e => `<button class="install-btn ${catCss(cat)}" data-type="${e.id}">${esc(e.label)}</button>`).join('')}
+      </div>`).join('');
+
+    const nameH = pl.wallH ? `Parede ${Math.abs(pl.wallH.x2-pl.wallH.x1) > Math.abs(pl.wallH.y2-pl.wallH.y1) ? 'horizontal' : 'vertical'} (Y)` : 'Parede Y';
+    const nameV = pl.wallV ? `Parede ${Math.abs(pl.wallV.x2-pl.wallV.x1) < Math.abs(pl.wallV.y2-pl.wallV.y1) ? 'vertical' : 'horizontal'} (X)` : 'Parede X';
+
+    const panel = this._openSidePanel(`
+      <div class="op-header">
+        <span class="op-title">Inserir instalação — Piso</span>
+        <button class="op-close" id="op-x">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <div class="op-ref-hint" style="background:rgba(91,155,213,0.07);">
+        <span class="op-ref-dot" style="background:#5B9BD5;"></span>
+        Ponto no piso — amarrado em 2 paredes
+      </div>
+      <div class="op-body" id="install-body">
+        ${sectionsHtml}
+      </div>
+      <div class="op-footer" id="install-footer" style="display:none;">
+        <button class="btn-ghost" id="inst-back" style="font-size:11px;">← Tipos</button>
+        <button class="btn-primary" id="inst-confirm" style="flex:1;">Inserir</button>
+      </div>
+    `);
+
+    let selectedType = null;
+    const clearPreview = () => { this._installPreview = null; this._placingInstall = null; };
+    const closeForm    = () => { clearPreview(); this._closeSidePanel(); this._draw(); };
+
+    const syncFloor = (type, distXcm, distYcm) => {
+      if (!type) return;
+      const faceH = (pl.wallH?.thickness || 150) / 2;
+      const faceV = (pl.wallV?.thickness || 150) / 2;
+      const dXmm = parseLocaleFloat(String(distXcm)) * 10 + faceV;
+      const dYmm = parseLocaleFloat(String(distYcm)) * 10 + faceH;
+
+      // Calcular posição absoluta a partir das paredes de referência
+      let px = pl.floorX, py = pl.floorY;
+      if (pl.wallV) {
+        const midVx = (pl.wallV.x1 + pl.wallV.x2) / 2;
+        px = midVx + (pl.floorX > midVx ? 1 : -1) * dXmm;
+      }
+      if (pl.wallH) {
+        const midHy = (pl.wallH.y1 + pl.wallH.y2) / 2;
+        py = midHy + (pl.floorY > midHy ? 1 : -1) * dYmm;
+      }
+      this._installPreview = { x: px, y: py, type };
+      this._placingInstall.refX = px;
+      this._placingInstall.refY = py;
+      this._draw();
+    };
+
+    const showStep2Floor = (type) => {
+      selectedType = type;
+      const entry = getInstallEntry(type) || { label: type, defaultHeight: null };
+      const defH  = entry.defaultHeight != null ? String(entry.defaultHeight) : '';
+      document.getElementById('install-body').innerHTML = `
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;">${esc(entry.label)} — Piso</div>
+        <div class="form-group">
+          <label class="form-label">${nameV}: dist. da face (cm)</label>
+          <div class="op-input-wrap">
+            <input class="form-input op-num" id="inst-distX" inputmode="decimal" type="text" value="${pl.initDistX}">
+            <span class="op-unit">cm</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">${nameH}: dist. da face (cm)</label>
+          <div class="op-input-wrap">
+            <input class="form-input op-num" id="inst-distY" inputmode="decimal" type="text" value="${pl.initDistY}">
+            <span class="op-unit">cm</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Altura do piso (cm)</label>
+          <div class="op-input-wrap">
+            <input class="form-input op-num" id="inst-height" inputmode="decimal" type="text"
+              value="${defH}" placeholder="${entry.defaultHeight != null ? 'padrão: '+entry.defaultHeight : '—'}">
+            <span class="op-unit">cm</span>
+          </div>
+        </div>
+      `;
+      const footer = document.getElementById('install-footer');
+      if (footer) footer.style.display = '';
+      syncFloor(type, pl.initDistX, pl.initDistY);
+    };
+
+    if (!panel) return;
+
+    panel.addEventListener('input', e => {
+      if ((e.target.id === 'inst-distX' || e.target.id === 'inst-distY') && selectedType) {
+        const dx = document.getElementById('inst-distX')?.value || '0';
+        const dy = document.getElementById('inst-distY')?.value || '0';
+        syncFloor(selectedType, dx, dy);
+      }
+    });
+
+    panel.addEventListener('pointerup', e => {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      e.stopPropagation();
+      if (btn.id === 'op-x')    { closeForm(); return; }
+      if (btn.id === 'inst-back') {
+        selectedType = null;
+        this._installPreview = null;
+        document.getElementById('install-body').innerHTML = sectionsHtml;
+        const f = document.getElementById('install-footer');
+        if (f) f.style.display = 'none';
+        this._draw();
+        return;
+      }
+      if (btn.classList.contains('install-btn')) { showStep2Floor(btn.dataset.type); return; }
+      if (btn.id === 'inst-confirm') {
+        if (!selectedType || !this._installPreview) { Toast.show('Selecione o tipo', 'error'); return; }
+        const ip = this._installPreview;
+        const inst = createInstallation(selectedType, ip.x, ip.y, this.project.canvas);
+        const hEl  = panel.querySelector('#inst-height');
+        const hVal = parseLocaleFloatOrNull(hEl?.value || '');
+        inst.height = hVal !== null ? Math.round(hVal) : inst.height;
+        // Salvar referências de parede X e Y para documentação
+        inst.wallId = pl.wallV?.id ?? pl.wallH?.id ?? null;
+        inst.wallT  = null; // ponto de piso não tem T
+        this._pushHistory();
+        this.project.canvas.installations.push(inst);
+        clearPreview();
+        this._closeSidePanel();
+        this._scheduleSave();
+        this._draw();
+        Toast.show(`${getInstallEntry(selectedType)?.label || selectedType} inserido no piso`, 'success');
+      }
+    });
   },
 
   _drawInstallPreview(ctx) {
