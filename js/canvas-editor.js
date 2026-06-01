@@ -514,39 +514,55 @@ const CanvasEditor = {
   // Para paredes: além dos eixos (centro), também as FACES (±espessura/2)
   // perpendicularmente, para cotas internas e externas corretas.
   _snapToArchPoint(rawWorld) {
-    const R  = 20 / this.zoom;
+    const R  = 28 / this.zoom; // raio de captura da face (screen-pixels independente do zoom)
     const c  = this.project.canvas;
     const candidates = [];
 
+    // ── Faces de parede via projeção perpendicular ──────────────────────────
+    // Para cada parede projeta o cursor perpendicularmente sobre o eixo da
+    // parede. O snap só ativa se o cursor cair DENTRO do comprimento da parede
+    // e dentro do raio R da face. Resultado: a cruz sempre aparece SOBRE a
+    // parede (nunca flutuando no vazio).
     for (const w of c.walls) {
       const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx*dx + dy*dy);
       if (!len) continue;
-      const nx = -dy / len, ny = dx / len; // normal perpendicular à parede
-      const t  = (w.thickness || 150) / 2; // metade da espessura
+      const ux = dx / len, uy = dy / len;   // unitário ao longo da parede
+      const nx = -uy,       ny = ux;         // normal perpendicular
+      const t  = (w.thickness || 150) / 2;  // metade da espessura
 
-      // REGRA: snap APENAS na face de onde o usuário está tocando.
-      // Arquiteta trabalha sempre dentro do ambiente → snap capta a face interna.
-      // Só UMA face por ponto (a do lado do toque) — sem face oposta/externa.
-      for (const [px, py] of [
-        [w.x1, w.y1],
-        [w.x2, w.y2],
-        [(w.x1+w.x2)/2, (w.y1+w.y2)/2],
-      ]) {
-        const toX = rawWorld.x - px, toY = rawWorld.y - py;
-        const onNSide = nx * toX + ny * toY; // positivo = usuário está do lado do normal
-        const sign = onNSide > 0 ? 1 : -1;
-        const fx = sign * nx * t, fy = sign * ny * t;
-        // faceSeg: linha completa da face capturada — usada p/ highlight visual
+      // Projeção do cursor sobre o eixo da parede
+      const rx = rawWorld.x - w.x1, ry = rawWorld.y - w.y1;
+      const along = rx * ux + ry * uy; // distância ao longo da parede
+      const perp  = rx * nx + ry * ny; // distância perpendicular ao eixo
+
+      // Cursor mais longe que R de ambas as faces → ignora
+      if (Math.abs(perp) > t + R) continue;
+
+      // Clampear ao comprimento da parede — permite snap nos cantos/extremidades
+      const clAlong = Math.max(0, Math.min(len, along));
+      const projX = w.x1 + ux * clAlong;
+      const projY = w.y1 + uy * clAlong;
+
+      // Face do lado do cursor (determina por sinal da projeção perp)
+      const sign = perp >= 0 ? 1 : -1;
+      const fx   = sign * nx * t, fy = sign * ny * t;
+
+      // Snap point: ponto projetado deslocado para a face
+      const snapX = projX + fx;
+      const snapY = projY + fy;
+
+      const d = dist(rawWorld.x, rawWorld.y, snapX, snapY);
+      if (d < R) {
         candidates.push({
-          x: px + fx, y: py + fy,
-          label: 'Face', priority: 1,
+          x: snapX, y: snapY,
+          priority: 1,
           faceSeg: { x1: w.x1 + fx, y1: w.y1 + fy, x2: w.x2 + fx, y2: w.y2 + fy },
         });
       }
     }
 
-    // Bordas e centro de cada abertura (porta/janela)
+    // ── Bordas e centro de aberturas (porta/janela) ────────────────────────
     for (const o of c.openings) {
       const w = c.walls.find(w => w.id === o.wallId);
       if (!w) continue;
@@ -561,9 +577,8 @@ const CanvasEditor = {
       candidates.push({ x: cx,             y: cy,             label: 'Centro' });
     }
 
-    // Instalações têm prioridade ABSOLUTA — verificar primeiro, retornar imediatamente.
-    // Se há instalação dentro do raio, nunca mostra "Face" — snap vai direto no ponto.
-    const RINST = 22 / this.zoom; // raio ligeiramente maior para instalações
+    // ── Instalações — prioridade absoluta ─────────────────────────────────
+    const RINST = 22 / this.zoom;
     for (const inst of c.installations) {
       const d = dist(rawWorld.x, rawWorld.y, inst.x, inst.y);
       if (d < RINST) {
@@ -572,7 +587,7 @@ const CanvasEditor = {
       }
     }
 
-    // Sem instalação próxima: usa face de parede normalmente
+    // ── Melhor candidato ──────────────────────────────────────────────────
     let best = null, bestScore = Infinity;
     for (const pt of candidates) {
       const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
