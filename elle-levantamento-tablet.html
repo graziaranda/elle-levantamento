@@ -3020,7 +3020,9 @@ const CanvasEditor = {
 
         const d = dist(rawWorld.x, rawWorld.y, snapX, snapY);
         if (d < R) {
-          candidates.push({ x: snapX, y: snapY, priority: 1 });
+          // wallDir = direção unitária da parede, para desenhar o risco alinhado
+          candidates.push({ x: snapX, y: snapY, priority: 1,
+            wallDir: { dx: dx/len, dy: dy/len } });
         }
       }
     }
@@ -4545,40 +4547,18 @@ const CanvasEditor = {
     const pt = this._archSnapPt;
     if (!pt) return;
 
-    // Risco perpendicular (tick mark) — mostra exatamente de onde parte a cota
-    // O risco é perpendicular à direção da cota (parallel à parede)
-    const tick = 120 / this.zoom; // comprimento do risco em mm
-    const thick = 2.5 / this.zoom;
+    // Risco: linha perpendicular à parede no ponto de snap
+    // Usa a direção da parede que gerou o snap (armazenada em pt.wallDir)
+    if (!pt.wallDir) return; // não mostrar se não tem direção de parede
+    const { dx: wd, dy: wdy } = pt.wallDir;
+    const tick  = 100 / this.zoom;
     ctx.strokeStyle = '#C9A84C';
-    ctx.lineWidth   = thick;
+    ctx.lineWidth   = 2.5 / this.zoom;
     ctx.setLineDash([]);
-
-    // Determina direção do risco: usa a parede mais próxima do snap
-    let tickDx = 1, tickDy = 0; // padrão horizontal
-    const walls = this.project.canvas.walls;
-    let minDist = Infinity;
-    for (const w of walls) {
-      for (const [ex, ey] of [[w.x1,w.y1],[w.x2,w.y2]]) {
-        const d2 = (pt.x-ex)**2+(pt.y-ey)**2;
-        if (d2 < minDist) {
-          minDist = d2;
-          const dx=w.x2-w.x1, dy=w.y2-w.y1;
-          const l=Math.sqrt(dx*dx+dy*dy);
-          if (l>0) { tickDx=dx/l; tickDy=dy/l; }
-        }
-      }
-    }
-
     ctx.beginPath();
-    ctx.moveTo(pt.x - tickDx*tick, pt.y - tickDy*tick);
-    ctx.lineTo(pt.x + tickDx*tick, pt.y + tickDy*tick);
+    ctx.moveTo(pt.x - wd * tick, pt.y - wdy * tick);
+    ctx.lineTo(pt.x + wd * tick, pt.y + wdy * tick);
     ctx.stroke();
-
-    // Ponto central pequeno
-    ctx.fillStyle = '#C9A84C';
-    ctx.beginPath();
-    ctx.arc(pt.x, pt.y, 4/this.zoom, 0, Math.PI*2);
-    ctx.fill();
 
     // Badge de label (Vão / Centro) se existir
     if (pt.label) {
