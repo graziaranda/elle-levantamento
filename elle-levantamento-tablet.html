@@ -3564,45 +3564,68 @@ const CanvasEditor = {
   // ── Dimensions ───────────────────────────
 
   _drawDimensions(ctx) {
-    const TIERS = [400, 900, 1400, 1900]; // tiers de offset em mm
+    const TIERS = [400, 900, 1400, 1900];
+    const walls = this.project.canvas.walls;
 
-    // Pré-computa offset real de cada cota: exterior + sem conflito com já colocadas
-    const placed = []; // { mx, my, nx, ny, len } para detectar sobreposição
-    const offMap = new Map(); // d.id → offset calculado
+    // Bbox das paredes próximas a um ponto (para garantir que cota vai para fora)
+    const localBBox = (midX, midY) => {
+      const R = 6000;
+      const pool = walls.filter(w => {
+        const wx=(w.x1+w.x2)/2, wy=(w.y1+w.y2)/2;
+        return Math.sqrt((wx-midX)**2+(wy-midY)**2) < R;
+      });
+      const src = pool.length >= 2 ? pool : walls;
+      let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+      for (const w of src) {
+        x0=Math.min(x0,w.x1,w.x2); y0=Math.min(y0,w.y1,w.y2);
+        x1=Math.max(x1,w.x1,w.x2); y1=Math.max(y1,w.y1,w.y2);
+      }
+      return { x0, y0, x1, y1 };
+    };
+    // Ponto está fora da bbox (com margem 100mm)?
+    const isExterior = (x, y, bb) =>
+      x < bb.x0 - 100 || x > bb.x1 + 100 || y < bb.y0 - 100 || y > bb.y1 + 100;
 
-    // Processa cotas com menor offset armazenado primeiro → garantem tier interno (400mm)
+    const placed = [];
+    const offMap = new Map();
+
+    // Ordena por magnitude do offset: cotas mais próximas primeiro (tier interno menor)
     const sorted = [...this.project.canvas.dimensions]
       .sort((a, b) => Math.abs(a.offset ?? 400) - Math.abs(b.offset ?? 400));
 
     for (const d of sorted) {
-      const dx  = d.x2 - d.x1, dy = d.y2 - d.y1;
-      const len = Math.sqrt(dx*dx + dy*dy);
+      const dx = d.x2-d.x1, dy = d.y2-d.y1;
+      const len = Math.sqrt(dx*dx+dy*dy);
       if (!len) { offMap.set(d.id, 400); continue; }
       const ux = dx/len, uy = dy/len;
-      const pnx = -uy, pny = ux; // normal perpendicular
+      const pnx = -uy, pny = ux;
+      const midX = (d.x1+d.x2)/2, midY = (d.y1+d.y2)/2;
+      const bb = localBBox(midX, midY);
 
-      // Determina sinal exterior (positivo ou negativo)
-      const sign = this._exteriorOffset({x:d.x1,y:d.y1},{x:d.x2,y:d.y2}, 1);
+      let chosenOff = null;
+      outer: for (const tier of TIERS) {
+        // Testa os dois sentidos: primeiro o que já era calculado como exterior, depois o oposto
+        for (const s of [1, -1]) {
+          const tryOff = s * tier;
+          const cmx = midX + pnx * tryOff;
+          const cmy = midY + pny * tryOff;
 
-      // Encontra o primeiro tier que não conflita com cotas já colocadas
-      let chosenOff = sign * TIERS[0];
-      for (const tier of TIERS) {
-        const tryOff = sign * tier;
-        const cotaMidX = (d.x1+d.x2)/2 + pnx * tryOff;
-        const cotaMidY = (d.y1+d.y2)/2 + pny * tryOff;
-        let conflict = false;
-        for (const prev of placed) {
-          const dotN = Math.abs(ux*prev.nx + uy*prev.ny);
-          if (dotN < 0.85) continue; // não paralela
-          const perpDist = Math.abs(pnx*(prev.mx-cotaMidX) + pny*(prev.my-cotaMidY));
-          if (perpDist > 280) continue; // linhas suficientemente separadas
-          const parDist  = Math.abs(ux*(prev.mx-cotaMidX)  + uy*(prev.my-cotaMidY));
-          if (parDist > (len + prev.len)/2 + 200) continue; // extents não sobrepostos
-          conflict = true; break;
+          // Garantia: o ponto de referência da cota DEVE ficar fora da bbox
+          if (!isExterior(cmx, cmy, bb)) continue;
+
+          // Verifica conflito com cotas já posicionadas
+          let conflict = false;
+          for (const prev of placed) {
+            if (Math.abs(ux*prev.nx+uy*prev.ny) < 0.85) continue;
+            if (Math.abs(pnx*(prev.mx-cmx)+pny*(prev.my-cmy)) > 280) continue;
+            if (Math.abs(ux*(prev.mx-cmx)+uy*(prev.my-cmy)) > (len+prev.len)/2+200) continue;
+            conflict = true; break;
+          }
+          if (!conflict) { chosenOff = tryOff; break outer; }
         }
-        if (!conflict) { chosenOff = tryOff; break; }
       }
-      placed.push({ mx:(d.x1+d.x2)/2+pnx*chosenOff, my:(d.y1+d.y2)/2+pny*chosenOff, nx:ux, ny:uy, len });
+      chosenOff = chosenOff ?? (400 * (isExterior(midX+pnx*400, midY+pny*400, bb) ? 1 : -1));
+      placed.push({ mx:midX+pnx*chosenOff, my:midY+pny*chosenOff, nx:ux, ny:uy, len });
       offMap.set(d.id, chosenOff);
     }
 
