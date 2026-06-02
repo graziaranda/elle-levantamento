@@ -2800,7 +2800,7 @@ const CanvasEditor = {
       select:      'Toque num elemento para selecionar · Toque fora para desselecionar',
       erase:       'Arraste para selecionar uma área · solte para apagar os elementos dentro',
       wall:        'Toque para marcar o início · arraste na direção e solte para digitar a medida (cm)',
-      dimension:   'Toque no 1º ponto da cota · 2º toque finaliza a medida',
+      dimension:   'Toque numa parede → cota automática · Ou toque 2 pontos para medida personalizada',
       door:        'Arraste até a parede onde fica a porta e solte (a parede acende)',
       window:      'Arraste até a parede onde fica a janela e solte (a parede acende)',
       install:     'Arraste até parede → modo parede · Toque no piso (centro do ambiente) → modo piso (X + Y)',
@@ -4717,18 +4717,29 @@ const CanvasEditor = {
   },
 
   _clickDim(rawWorld) {
-    // Snap magnético para cotas: captura pontos arquitetônicos estratégicos
+    this._archSnapPt = null;
+
+    // ── MODO RÁPIDO: toque no corpo de uma parede → cota automática ──────────
+    // Se o cursor está sobre o corpo de uma parede (não perto de endpoint),
+    // cria a cota imediatamente sem precisar de 2 cliques.
+    if (!this.drawStart) {
+      const autoWall = this._wallUnderCursor(rawWorld);
+      if (autoWall) {
+        this._createWallDim(autoWall);
+        return;
+      }
+    }
+
+    // ── MODO 2 CLIQUES: para medidas personalizadas (ponto a ponto) ──────────
     const snapped = this._snapToArchPoint(rawWorld) || rawWorld;
-    this._archSnapPt = null; // limpa indicador após clique
 
     if (!this.drawStart) {
       this.drawStart = snapped;
       this._updateCancelBtn();
-      Toast.show('Ponto inicial marcado — toque no ponto final', 'info', 2500);
+      Toast.show('Ponto inicial marcado — toque no ponto final', 'info', 2000);
     } else {
       const len = dist(this.drawStart.x, this.drawStart.y, snapped.x, snapped.y);
       if (len > 10) {
-        // Magnitude do offset (tier automático) + sinal que força para o exterior
         const offsetMag = this._calcDimOffset(this.drawStart, snapped);
         const offset    = this._exteriorOffset(this.drawStart, snapped, offsetMag);
         this._pushHistory();
@@ -4744,6 +4755,61 @@ const CanvasEditor = {
       this.drawStart = null;
       this._draw();
     }
+  },
+
+  // Retorna a parede sob o cursor (no corpo, não nos endpoints), ou null
+  _wallUnderCursor(rawWorld) {
+    const HIT = (w) => (w.thickness || 150) / 2 + 80 / this.zoom;
+    for (const w of this.project.canvas.walls) {
+      const dx = w.x2-w.x1, dy = w.y2-w.y1;
+      const len = Math.sqrt(dx*dx+dy*dy);
+      if (!len) continue;
+      const ux=dx/len, uy=dy/len;
+      const rx=rawWorld.x-w.x1, ry=rawWorld.y-w.y1;
+      const along = rx*ux + ry*uy;
+      const perp  = Math.abs(rx*(-uy) + ry*ux);
+      // Cursor está no corpo da parede (não nos extremos finais)
+      if (along > 150 && along < len-150 && perp < HIT(w)) return w;
+    }
+    return null;
+  },
+
+  // Cria cota automática para uma parede (face interna de ponta a ponta)
+  _createWallDim(w) {
+    const dx=w.x2-w.x1, dy=w.y2-w.y1;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    if (!len) return;
+    const ux=dx/len, uy=dy/len;
+    const nx=-uy, ny=ux;
+    const t=(w.thickness||150)/2;
+
+    // Face interna: usa centroide local
+    const cx = (w.x1+w.x2)/2, cy = (w.y1+w.y2)/2;
+    const nearby = this.project.canvas.walls.filter(o=>{
+      const ox=(o.x1+o.x2)/2, oy=(o.y1+o.y2)/2;
+      return Math.sqrt((ox-cx)**2+(oy-cy)**2) < 6000;
+    });
+    const pool = nearby.length >= 2 ? nearby : this.project.canvas.walls;
+    let ccx=0,ccy=0,n=0;
+    for (const o of pool){ccx+=o.x1+o.x2;ccy+=o.y1+o.y2;n+=2;}
+    ccx/=n; ccy/=n;
+    const dotC = nx*(ccx-cx) + ny*(ccy-cy);
+    const sign = dotC >= 0 ? 1 : -1;
+
+    const p1 = { x: w.x1 + sign*nx*t, y: w.y1 + sign*ny*t };
+    const p2 = { x: w.x2 + sign*nx*t, y: w.y2 + sign*ny*t };
+
+    const offsetMag = this._calcDimOffset(p1, p2);
+    const offset    = this._exteriorOffset(p1, p2, offsetMag);
+    this._pushHistory();
+    this.project.canvas.dimensions.push({
+      id: generateId(),
+      x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y,
+      value: null, offset, wallId: null, label: null,
+    });
+    this._scheduleSave();
+    Toast.show(`Cota ${fmtMm(len)} criada`, 'success', 1500);
+    this._draw();
   },
 
   _clickSelect(rawWorld) {
