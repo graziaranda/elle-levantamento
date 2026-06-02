@@ -6129,7 +6129,10 @@ const CanvasEditor = {
       if (w) { const cx=w.x1+(w.x2-w.x1)*o.position, cy=w.y1+(w.y2-w.y1)*o.position; if (inside(cx,cy)) ids.push({type:'opening',id:o.id}); }
     }
     for (const e of (c.environments||[])) {
-      if (e.centroid && inside(e.centroid.x, e.centroid.y)) ids.push({type:'env',id:e.id});
+      if (e.polygon && e.polygon.length >= 3) {
+        const cen = polygonCentroid(e.polygon);
+        if (inside(cen.x, cen.y)) ids.push({type:'env', id:e.id});
+      }
     }
     return ids;
   },
