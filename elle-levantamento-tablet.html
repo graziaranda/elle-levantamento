@@ -3166,24 +3166,30 @@ const CanvasEditor = {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      if (env.centroid) {
+      if (env.polygon && env.polygon.length >= 3) {
+        // Centro visual: bounding box do polígono — sempre parece centralizado
+        // mesmo em ambientes com forma irregular (L, diagonal, etc.)
+        const xs = env.polygon.map(p => p.x);
+        const ys = env.polygon.map(p => p.y);
+        const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+        const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+
         const fs  = 18 / this.zoom;
         const sel = this.selected?.id === env.id;
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
         ctx.font      = `500 ${fs}px Inter,sans-serif`;
         ctx.fillStyle = sel ? 'rgba(201,168,76,0.85)' : 'rgba(201,168,76,0.55)';
-        ctx.fillText(env.name || 'Ambiente', env.centroid.x, env.centroid.y);
+        ctx.fillText(env.name || 'Ambiente', cx, cy);
         if (env.area != null) {
           ctx.font      = `400 ${fs * 0.68}px Inter,sans-serif`;
           ctx.fillStyle = 'rgba(168,152,128,0.45)';
-          ctx.fillText(`${(env.area / 1e6).toFixed(2)} m²`, env.centroid.x, env.centroid.y + fs * 1.1);
+          ctx.fillText(`${(env.area / 1e6).toFixed(2)} m²`, cx, cy + fs * 1.1);
         }
         if (env.peDireito) {
           ctx.font      = `400 ${fs * 0.6}px Inter,sans-serif`;
           ctx.fillStyle = 'rgba(91,155,213,0.45)';
-          const row3 = env.centroid.y + fs * 1.1 + fs * 0.68 * 1.2;
-          ctx.fillText(`pé: ${env.peDireito}m`, env.centroid.x, row3);
+          ctx.fillText(`pé: ${env.peDireito}m`, cx, cy + fs * 1.1 + fs * 0.68 * 1.2);
         }
         ctx.textBaseline = 'alphabetic';
       }
