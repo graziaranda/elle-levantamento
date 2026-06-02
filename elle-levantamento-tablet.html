@@ -2466,6 +2466,8 @@ const CanvasEditor = {
   _archSnapPt: null,   // ponto arquitetônico capturado pelo snap magnético de cota
   _wallSnapPt: null,   // endpoint de parede capturado pelo snap magnético de parede
   _trackSnap:  null,   // tracking snap ativo (alinhamento H/V com endpoint existente)
+  _rubber:     null,   // borracha: { x1,y1,x2,y2 } em world coords
+  _rubberIds:  [],     // elementos selecionados pela borracha [{type,id}]
 
   // Inserção de porta/janela arrastando até a parede
   _placingOpening: null,  // { type, wallId, position, cx, cy } | null
@@ -2574,6 +2576,7 @@ const CanvasEditor = {
         <div class="editor-toolbar" id="toolbar">
           <div class="tool-group">
             ${this._toolBtn('select',      this._ic('cursor'),  'Selecionar')}
+            ${this._toolBtn('erase',       this._ic('erase'),   'Borracha')}
             ${this._toolBtn('wall',        this._ic('wall'),    'Parede')}
             ${this._toolBtn('dimension',   this._ic('dim'),     'Cota')}
           </div>
@@ -2783,6 +2786,8 @@ const CanvasEditor = {
     this._archSnapPt     = null;
     this._wallSnapPt     = null;
     this._trackSnap      = null;
+    this._rubber         = null;
+    this._rubberIds      = [];
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -2793,6 +2798,7 @@ const CanvasEditor = {
 
     const hints = {
       select:      'Toque num elemento para selecionar · Toque fora para desselecionar',
+      erase:       'Arraste para selecionar uma área · solte para apagar os elementos dentro',
       wall:        'Toque para marcar o início · arraste na direção e solte para digitar a medida (cm)',
       dimension:   'Toque no 1º ponto da cota · 2º toque finaliza a medida',
       door:        'Arraste até a parede onde fica a porta e solte (a parede acende)',
@@ -2931,6 +2937,46 @@ const CanvasEditor = {
     ctx.textBaseline = 'alphabetic';
   },
 
+  // ── Borracha: retângulo de seleção ────────────────────────────────────────
+
+  _drawRubber(ctx) {
+    const r = this._rubber;
+    if (!r) return;
+    const x = Math.min(r.x1, r.x2), y = Math.min(r.y1, r.y2);
+    const w = Math.abs(r.x2 - r.x1), h = Math.abs(r.y2 - r.y1);
+    if (w < 10 && h < 10) return;
+
+    // Preenchimento translúcido vermelho
+    ctx.fillStyle = 'rgba(220,50,50,0.08)';
+    ctx.fillRect(x, y, w, h);
+
+    // Borda tracejada vermelha
+    ctx.strokeStyle = 'rgba(220,50,50,0.85)';
+    ctx.lineWidth   = 2 / this.zoom;
+    ctx.setLineDash([15 / this.zoom, 8 / this.zoom]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.setLineDash([]);
+
+    // Contador no canto do retângulo
+    const n = this._rubberIds.length;
+    if (n > 0) {
+      const fs  = 14 / this.zoom;
+      const pad = 6  / this.zoom;
+      const lbl = `${n} elemento${n > 1 ? 's' : ''}`;
+      ctx.font = `700 ${fs}px Inter,sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const tw = ctx.measureText(lbl).width;
+      ctx.fillStyle = 'rgba(220,50,50,0.9)';
+      ctx.beginPath();
+      ctx.roundRect(x + 4/this.zoom, y + 4/this.zoom, tw + pad*2, fs + pad, 4/this.zoom);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(lbl, x + 4/this.zoom + pad, y + 4/this.zoom + pad*0.5);
+      ctx.textBaseline = 'alphabetic';
+    }
+  },
+
   // ── Snap magnético para cotas ─────────────────────────────────────────────
   // Captura pontos estratégicos com raio 20px.
   // Para paredes: além dos eixos (centro), também as FACES (±espessura/2)
@@ -3033,6 +3079,7 @@ const CanvasEditor = {
     if (this._installPreview) this._layer('previa-install', () => this._drawInstallPreview(ctx));
     if (this._archSnapPt)     this._layer('snap-arch',      () => this._drawArchSnap(ctx));
     if (this._wallSnapPt)     this._layer('snap-wall',      () => this._drawWallSnap(ctx));
+    if (this._rubber)         this._layer('borracha',       () => this._drawRubber(ctx));
     if (this.drawStart) this._layer('preview', () => this._drawPreview(ctx));
     if (this.currentTool === 'environment') this._layer('preview-amb', () => this._drawEnvPreview(ctx));
 
@@ -5990,6 +6037,50 @@ const CanvasEditor = {
     this._draw();
   },
 
+  // ── Borracha: selecionar e apagar em área ─────────────────────────────
+
+  // Retorna lista de {type, id} para todos os elementos dentro do rect
+  _elementsInRect(r) {
+    const c    = this.project.canvas;
+    const minX = Math.min(r.x1, r.x2), maxX = Math.max(r.x1, r.x2);
+    const minY = Math.min(r.y1, r.y2), maxY = Math.max(r.y1, r.y2);
+    const inside = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY;
+    const ids = [];
+    for (const w of (c.walls||[]))         { if (inside(w.x1,w.y1)||inside(w.x2,w.y2)) ids.push({type:'wall',id:w.id}); }
+    for (const d of (c.dimensions||[]))    { if (inside(d.x1,d.y1)||inside(d.x2,d.y2)) ids.push({type:'dim',id:d.id}); }
+    for (const i of (c.installations||[])){ if (inside(i.x,i.y))                        ids.push({type:'inst',id:i.id}); }
+    for (const n of (c.notes||[]))         { if (inside(n.x,n.y))                        ids.push({type:'note',id:n.id}); }
+    for (const p of (c.photoPins||[]))     { if (inside(p.x,p.y))                        ids.push({type:'pin',id:p.id}); }
+    for (const o of (c.openings||[]))      {
+      const w = (c.walls||[]).find(w=>w.id===o.wallId);
+      if (w) { const cx=w.x1+(w.x2-w.x1)*o.position, cy=w.y1+(w.y2-w.y1)*o.position; if (inside(cx,cy)) ids.push({type:'opening',id:o.id}); }
+    }
+    for (const e of (c.environments||[])) {
+      if (e.centroid && inside(e.centroid.x, e.centroid.y)) ids.push({type:'env',id:e.id});
+    }
+    return ids;
+  },
+
+  // Apaga os elementos da lista de ids da borracha
+  _deleteRubberIds(ids) {
+    const c   = this.project.canvas;
+    const set = new Set(ids.map(e=>e.id));
+    const hasWall = ids.some(e=>e.type==='wall');
+    c.walls         = c.walls.filter(w=>!set.has(w.id));
+    c.dimensions    = c.dimensions.filter(d=>!set.has(d.id));
+    c.installations = c.installations.filter(i=>!set.has(i.id));
+    c.notes         = c.notes.filter(n=>!set.has(n.id));
+    c.photoPins     = c.photoPins.filter(p=>!set.has(p.id));
+    c.openings      = c.openings.filter(o=>!set.has(o.id));
+    c.environments  = c.environments.filter(e=>!set.has(e.id));
+    // Remove aberturas orphans quando parede apagada
+    if (hasWall) {
+      const wallIds = new Set(c.walls.map(w=>w.id));
+      c.openings = c.openings.filter(o=>wallIds.has(o.wallId));
+    }
+    this._draw();
+  },
+
   // ── Fit to screen ─────────────────────────
 
   _fitScreen() {
@@ -6120,6 +6211,15 @@ const CanvasEditor = {
       const rect = this.canvas.getBoundingClientRect();
       const raw  = this.toWorld(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
       this.mouseWorld = this._snapWorld(raw, false);
+
+      // Borracha: inicia o retângulo de seleção
+      if (this.currentTool === 'erase') {
+        this._rubber    = { x1: raw.x, y1: raw.y, x2: raw.x, y2: raw.y };
+        this._rubberIds = [];
+        this._draw();
+        return;
+      }
+
       // Parede: se já há ponto inicial, este dedo começa a mirar a direção
       if (this.currentTool === 'wall' && this.drawStart) {
         this._aiming = true;
@@ -6194,6 +6294,15 @@ const CanvasEditor = {
         }
       }
 
+      // Borracha: arrasto define o retângulo de seleção
+      if (this.currentTool === 'erase' && this._rubber) {
+        const rect = this.canvas.getBoundingClientRect();
+        const cur  = this.toWorld(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+        this._rubber.x2 = cur.x;
+        this._rubber.y2 = cur.y;
+        this._rubberIds = this._elementsInRect(this._rubber);
+      }
+
       this._touches = Array.from(e.touches);
       this._draw();
 
@@ -6233,6 +6342,25 @@ const CanvasEditor = {
       const rect  = this.canvas.getBoundingClientRect();
       const raw   = this.toWorld(t.clientX - rect.left, t.clientY - rect.top);
       const world = this._snapWorld(raw, false);
+
+      // Borracha: finaliza seleção e mostra confirmação
+      if (this.currentTool === 'erase') {
+        const ids = this._rubberIds;
+        this._rubber = null;
+        if (ids.length > 0) {
+          if (confirm(`Apagar ${ids.length} elemento${ids.length > 1 ? 's' : ''}?`)) {
+            this._pushHistory();
+            this._deleteRubberIds(ids);
+            this._scheduleSave();
+            Toast.show(`${ids.length} elemento${ids.length > 1 ? 's apagados' : ' apagado'}`, 'success');
+          }
+        }
+        this._rubberIds = [];
+        this._draw();
+        this._touches = Array.from(e.touches);
+        this._touchStartPos = null;
+        return;
+      }
 
       // Parede: fluxo próprio (início por toque, direção por arraste/toque-alvo)
       if (this.currentTool === 'wall') {
@@ -6625,6 +6753,7 @@ const CanvasEditor = {
       'redo':   `<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M11 4.5H5a3.5 3.5 0 1 0 0 7h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.5 2L11 4.5L8.5 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       'download':`<svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1.5v7M4 6.5l2.5 2.5 2.5-2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M1.5 10.5h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`,
       'cursor': `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 2L3 12L6 8.5L9 13L10.5 12L7.5 7L12 7L3 2Z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>`,
+      'erase':  `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="1.5" width="11" height="11" rx="1.2" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2.5 1.5"/><path d="M5 9l4-4M5 5l4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
       'wall':   `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10" stroke="currentColor" stroke-width="3" stroke-linecap="square"/></svg>`,
       'dim':    `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M2 4v6M12 4v6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
       'door':   `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4 13V3h6v3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M10 6a4 4 0 0 1-4 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`,
