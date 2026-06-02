@@ -4865,9 +4865,10 @@ const CanvasEditor = {
     const fD = { x: w.x2+ox2,                    y: w.y2+oy2 };                // fim da parede
 
     const dims = [];
-    if (dist(fA.x,fA.y,fB.x,fB.y) > 50)  dims.push([fA,fB]); // distância início → borda esq
-    dims.push([fB,fC]); // largura do vão
-    if (dist(fC.x,fC.y,fD.x,fD.y) > 50)  dims.push([fC,fD]); // distância borda dir → fim
+    const MIN = 150; // mínimo 15cm para criar cota (evita riscos de 0,07m)
+    if (dist(fA.x,fA.y,fB.x,fB.y) > MIN) dims.push([fA,fB]); // distância início → borda esq
+    dims.push([fB,fC]); // largura do vão (sempre mostra)
+    if (dist(fC.x,fC.y,fD.x,fD.y) > MIN) dims.push([fC,fD]); // distância borda dir → fim
 
     this._pushHistory();
     for (const [p1,p2] of dims) {
