@@ -4539,9 +4539,18 @@ const CanvasEditor = {
     const walls = this.project.canvas.walls;
     if (!walls.length) return offsetMag;
 
-    // Centroide do levantamento (média de todos os endpoints de parede)
+    // Centroide LOCAL: usa apenas paredes próximas à cota (evita cômodos distantes
+    // de testes espalhados no canvas distorcendo o centroide global).
+    const midX = (p1.x + p2.x) / 2, midY = (p1.y + p2.y) / 2;
+    const RANGE = 6000; // 6m de raio local
+    const nearby = walls.filter(w => {
+      const wx = (w.x1 + w.x2) / 2, wy = (w.y1 + w.y2) / 2;
+      return Math.sqrt((wx - midX) ** 2 + (wy - midY) ** 2) < RANGE;
+    });
+    const pool = nearby.length >= 2 ? nearby : walls; // fallback se muito poucas
+
     let cx = 0, cy = 0, n = 0;
-    for (const w of walls) {
+    for (const w of pool) {
       cx += w.x1 + w.x2; cy += w.y1 + w.y2; n += 2;
     }
     cx /= n; cy /= n;
@@ -6123,7 +6132,9 @@ const CanvasEditor = {
     const minY = Math.min(r.y1, r.y2), maxY = Math.max(r.y1, r.y2);
     const inside = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY;
     const ids = [];
-    for (const w of (c.walls||[]))         { if (inside(w.x1,w.y1)||inside(w.x2,w.y2)) ids.push({type:'wall',id:w.id}); }
+    // Paredes: AMBOS os endpoints precisam estar dentro (evita selecionar parede ao mirar numa cota)
+    for (const w of (c.walls||[]))         { if (inside(w.x1,w.y1) && inside(w.x2,w.y2)) ids.push({type:'wall',id:w.id}); }
+    // Cotas: basta um endpoint estar dentro
     for (const d of (c.dimensions||[]))    { if (inside(d.x1,d.y1)||inside(d.x2,d.y2)) ids.push({type:'dim',id:d.id}); }
     for (const i of (c.installations||[])){ if (inside(i.x,i.y))                        ids.push({type:'inst',id:i.id}); }
     for (const n of (c.notes||[]))         { if (inside(n.x,n.y))                        ids.push({type:'note',id:n.id}); }
