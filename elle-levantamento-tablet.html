@@ -2986,8 +2986,12 @@ const CanvasEditor = {
     const c  = this.project.canvas;
     const candidates = [];
 
-    // Snap apenas nos CANTOS das paredes (extremidades), projetado para a face
-    // mais próxima do cursor. Nunca desliza ao longo da parede.
+    // Snap SEMPRE na face INTERNA da parede (voltada para o interior do cômodo).
+    // Usa centroide local das paredes próximas para determinar qual face é interna.
+    const RANGE_C = 6000;
+    const midAllX = c.walls.reduce((s,w)=>s+w.x1+w.x2,0) / (c.walls.length*2||1);
+    const midAllY = c.walls.reduce((s,w)=>s+w.y1+w.y2,0) / (c.walls.length*2||1);
+
     for (const w of c.walls) {
       const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
       const len = Math.sqrt(dx*dx + dy*dy);
@@ -2996,13 +3000,23 @@ const CanvasEditor = {
       const t  = (w.thickness || 150) / 2;
 
       for (const [px, py] of [[w.x1, w.y1], [w.x2, w.y2]]) {
-        // Lado do toque: determina qual face (positiva ou negativa do normal)
-        const toX = rawWorld.x - px, toY = rawWorld.y - py;
-        const onNSide = nx * toX + ny * toY;
-        const sign = onNSide >= 0 ? 1 : -1;
+        // Centroide local: média das paredes num raio de 6m deste endpoint
+        const nearby = c.walls.filter(o => {
+          const ox=(o.x1+o.x2)/2, oy=(o.y1+o.y2)/2;
+          return Math.sqrt((ox-px)**2+(oy-py)**2) < RANGE_C;
+        });
+        const pool = nearby.length >= 2 ? nearby : c.walls;
+        let cx=0, cy=0, n=0;
+        for (const o of pool) { cx+=o.x1+o.x2; cy+=o.y1+o.y2; n+=2; }
+        cx/=n; cy/=n;
 
-        const snapX = px + sign * nx * t;
-        const snapY = py + sign * ny * t;
+        // Sinal da face interna: a que aponta PARA o centroide
+        const toCentX = cx - px, toCentY = cy - py;
+        const dotCent = nx * toCentX + ny * toCentY;
+        const innerSign = dotCent >= 0 ? 1 : -1; // face interna = em direção ao centro
+
+        const snapX = px + innerSign * nx * t;
+        const snapY = py + innerSign * ny * t;
 
         const d = dist(rawWorld.x, rawWorld.y, snapX, snapY);
         if (d < R) {
