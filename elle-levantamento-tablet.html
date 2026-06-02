@@ -4719,10 +4719,15 @@ const CanvasEditor = {
   _clickDim(rawWorld) {
     this._archSnapPt = null;
 
-    // ── MODO RÁPIDO: toque no corpo de uma parede → cota automática ──────────
-    // Se o cursor está sobre o corpo de uma parede (não perto de endpoint),
-    // cria a cota imediatamente sem precisar de 2 cliques.
+    // ── MODO RÁPIDO ──────────────────────────────────────────────────────────
     if (!this.drawStart) {
+      // Toque numa porta/janela → amarrações automáticas (distância da extremidade ao vão)
+      const autoOpening = this._openingUnderCursor(rawWorld);
+      if (autoOpening) {
+        this._createOpeningDims(autoOpening);
+        return;
+      }
+      // Toque no corpo de uma parede → cota automática da parede
       const autoWall = this._wallUnderCursor(rawWorld);
       if (autoWall) {
         this._createWallDim(autoWall);
@@ -4809,6 +4814,72 @@ const CanvasEditor = {
     });
     this._scheduleSave();
     Toast.show(`Cota ${fmtMm(len)} criada`, 'success', 1500);
+    this._draw();
+  },
+
+  // Retorna a abertura (porta/janela) mais próxima do cursor, ou null
+  _openingUnderCursor(rawWorld) {
+    const HIT = 600 / this.zoom; // raio de captura em mm
+    let best = null, bestD = HIT;
+    for (const o of this.project.canvas.openings) {
+      const w = this.project.canvas.walls.find(w => w.id === o.wallId);
+      if (!w) continue;
+      const dx=w.x2-w.x1, dy=w.y2-w.y1, len=Math.sqrt(dx*dx+dy*dy);
+      if (!len) continue;
+      const cx=w.x1+dx*o.position, cy=w.y1+dy*o.position;
+      const d = dist(rawWorld.x, rawWorld.y, cx, cy);
+      if (d < bestD) { bestD=d; best={ opening:o, wall:w }; }
+    }
+    return best;
+  },
+
+  // Cria amarrações automáticas: distância da extremidade da parede até cada borda do vão
+  _createOpeningDims({ opening: o, wall: w }) {
+    const dx=w.x2-w.x1, dy=w.y2-w.y1;
+    const len=Math.sqrt(dx*dx+dy*dy);
+    if (!len) return;
+    const ux=dx/len, uy=dy/len;
+    const nx=-uy, ny=ux;
+    const t=(w.thickness||150)/2;
+
+    // Face interna da parede
+    const wCx=(w.x1+w.x2)/2, wCy=(w.y1+w.y2)/2;
+    const nearby=this.project.canvas.walls.filter(o=>{
+      const ox=(o.x1+o.x2)/2,oy=(o.y1+o.y2)/2;
+      return Math.sqrt((ox-wCx)**2+(oy-wCy)**2)<6000;
+    });
+    const pool=nearby.length>=2?nearby:this.project.canvas.walls;
+    let ccx=0,ccy=0,n=0;
+    for(const o2 of pool){ccx+=o2.x1+o2.x2;ccy+=o2.y1+o2.y2;n+=2;}
+    ccx/=n; ccy/=n;
+    const sign=(nx*(ccx-wCx)+ny*(ccy-wCy))>=0?1:-1;
+    const ox2=sign*nx*t, oy2=sign*ny*t;
+
+    const half=(o.width||900)/2;
+    const posAlong = len * o.position;
+
+    // 4 pontos na face interna: w.x1, borda esq vão, borda dir vão, w.x2
+    const fA = { x: w.x1+ox2,                    y: w.y1+oy2 };                // início da parede
+    const fB = { x: w.x1+ux*(posAlong-half)+ox2, y: w.y1+uy*(posAlong-half)+oy2 }; // borda esq vão
+    const fC = { x: w.x1+ux*(posAlong+half)+ox2, y: w.y1+uy*(posAlong+half)+oy2 }; // borda dir vão
+    const fD = { x: w.x2+ox2,                    y: w.y2+oy2 };                // fim da parede
+
+    const dims = [];
+    if (dist(fA.x,fA.y,fB.x,fB.y) > 50)  dims.push([fA,fB]); // distância início → borda esq
+    dims.push([fB,fC]); // largura do vão
+    if (dist(fC.x,fC.y,fD.x,fD.y) > 50)  dims.push([fC,fD]); // distância borda dir → fim
+
+    this._pushHistory();
+    for (const [p1,p2] of dims) {
+      const offsetMag=this._calcDimOffset(p1,p2);
+      const offset=this._exteriorOffset(p1,p2,offsetMag);
+      this.project.canvas.dimensions.push({
+        id:generateId(), x1:p1.x,y1:p1.y, x2:p2.x,y2:p2.y,
+        value:null, offset, wallId:null, label:null,
+      });
+    }
+    this._scheduleSave();
+    Toast.show(`${dims.length} cotas de amarração criadas`, 'success', 2000);
     this._draw();
   },
 
