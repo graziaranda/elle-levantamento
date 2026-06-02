@@ -4584,17 +4584,19 @@ const CanvasEditor = {
     const pt = this._archSnapPt;
     if (!pt) return;
 
-    // Risco: linha perpendicular à parede no ponto de snap
-    // Usa a direção da parede que gerou o snap (armazenada em pt.wallDir)
-    if (!pt.wallDir) return; // não mostrar se não tem direção de parede
+    // Risco: linha PERPENDICULAR à parede (mostra de onde parte a cota)
+    // wallDir = direção ao longo da parede → perpendicular = normal da parede
+    if (!pt.wallDir) return;
     const { dx: wd, dy: wdy } = pt.wallDir;
+    // Vetor perpendicular à parede (rotação 90°)
+    const perpX = -wdy, perpY = wd;
     const tick  = 100 / this.zoom;
     ctx.strokeStyle = '#C9A84C';
     ctx.lineWidth   = 2.5 / this.zoom;
     ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(pt.x - wd * tick, pt.y - wdy * tick);
-    ctx.lineTo(pt.x + wd * tick, pt.y + wdy * tick);
+    ctx.moveTo(pt.x - perpX * tick, pt.y - perpY * tick);
+    ctx.lineTo(pt.x + perpX * tick, pt.y + perpY * tick);
     ctx.stroke();
 
     // Badge de label (Vão / Centro) se existir
