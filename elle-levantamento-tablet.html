@@ -4857,12 +4857,25 @@ const CanvasEditor = {
 
     const half=(o.width||900)/2;
     const posAlong = len * o.position;
+    const SNAP2 = 25; // tolerância de conexão
 
-    // 4 pontos na face interna: w.x1, borda esq vão, borda dir vão, w.x2
-    const fA = { x: w.x1+ox2,                    y: w.y1+oy2 };                // início da parede
+    // Ajuste das referências: usa face interna das paredes adjacentes (não o eixo da parede)
+    // Parede conectada no início (w.x1,w.y1) → offset ao longo desta parede
+    const connStart = this.project.canvas.walls.find(ww => ww!==w && (
+      (Math.abs(ww.x1-w.x1)<SNAP2&&Math.abs(ww.y1-w.y1)<SNAP2) ||
+      (Math.abs(ww.x2-w.x1)<SNAP2&&Math.abs(ww.y2-w.y1)<SNAP2)));
+    const connEnd = this.project.canvas.walls.find(ww => ww!==w && (
+      (Math.abs(ww.x1-w.x2)<SNAP2&&Math.abs(ww.y1-w.y2)<SNAP2) ||
+      (Math.abs(ww.x2-w.x2)<SNAP2&&Math.abs(ww.y2-w.y2)<SNAP2)));
+
+    // Referência inicial: face interna da parede adjacente (avanço ao longo do eixo desta parede)
+    const startAdj = connStart ? (connStart.thickness||150)/2 : 0;
+    const endAdj   = connEnd   ? (connEnd.thickness||150)/2   : 0;
+
+    const fA = { x: w.x1+ux*startAdj+ox2, y: w.y1+uy*startAdj+oy2 }; // face interna início
     const fB = { x: w.x1+ux*(posAlong-half)+ox2, y: w.y1+uy*(posAlong-half)+oy2 }; // borda esq vão
     const fC = { x: w.x1+ux*(posAlong+half)+ox2, y: w.y1+uy*(posAlong+half)+oy2 }; // borda dir vão
-    const fD = { x: w.x2+ox2,                    y: w.y2+oy2 };                // fim da parede
+    const fD = { x: w.x2-ux*endAdj+ox2,   y: w.y2-uy*endAdj+oy2 };   // face interna fim
 
     const dims = [];
     const MIN = 150; // mínimo 15cm para criar cota (evita riscos de 0,07m)
