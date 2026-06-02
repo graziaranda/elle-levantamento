@@ -3038,17 +3038,26 @@ const CanvasEditor = {
         for (const o of pool) { cx+=o.x1+o.x2; cy+=o.y1+o.y2; n+=2; }
         cx/=n; cy/=n;
 
-        // Sinal da face interna: a que aponta PARA o centroide
-        const toCentX = cx - px, toCentY = cy - py;
-        const dotCent = nx * toCentX + ny * toCentY;
-        const innerSign = dotCent >= 0 ? 1 : -1; // face interna = em direção ao centro
+        // Sinal da face: para cômodos usa face interna (para o centroide).
+        // Para parede isolada (pool = só ela mesma), usa o lado mais próximo do cursor.
+        const isIsolated = pool.length <= 1;
+        let innerSign;
+        if (isIsolated) {
+          // Parede isolada: snap na face mais próxima do cursor
+          const toX = rawWorld.x - px, toY = rawWorld.y - py;
+          innerSign = (nx * toX + ny * toY) >= 0 ? 1 : -1;
+        } else {
+          // Cômodo: face interna = em direção ao centroide
+          const toCentX = cx - px, toCentY = cy - py;
+          const dotCent = nx * toCentX + ny * toCentY;
+          innerSign = dotCent >= 0 ? 1 : -1;
+        }
 
         const snapX = px + innerSign * nx * t;
         const snapY = py + innerSign * ny * t;
 
         const d = dist(rawWorld.x, rawWorld.y, snapX, snapY);
         if (d < R) {
-          // wallDir = direção unitária da parede, para desenhar o risco alinhado
           candidates.push({ x: snapX, y: snapY, priority: 1,
             wallDir: { dx: dx/len, dy: dy/len } });
         }
