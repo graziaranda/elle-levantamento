@@ -2900,6 +2900,34 @@ const CanvasEditor = {
     if (!pt) return;
     const r = 16 / this.zoom;
 
+    // ── Linhas de projeção H + V partindo do ponto de conexão ─────────────
+    // Mostram visualmente que a nova parede está alinhada com este ponto
+    const W = this.canvas.width  / this.zoom;
+    const H = this.canvas.height / this.zoom;
+    const ox = -this.panX / this.zoom;
+    const oy = -this.panY / this.zoom;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(90,154,112,0.45)';
+    ctx.lineWidth   = 1.2 / this.zoom;
+    ctx.setLineDash([40 / this.zoom, 18 / this.zoom]);
+
+    // Linha horizontal
+    ctx.beginPath();
+    ctx.moveTo(ox,     pt.y);
+    ctx.lineTo(ox + W, pt.y);
+    ctx.stroke();
+
+    // Linha vertical
+    ctx.beginPath();
+    ctx.moveTo(pt.x, oy);
+    ctx.lineTo(pt.x, oy + H);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // ── Indicador do ponto ─────────────────────────────────────────────────
     // Halo externo
     ctx.strokeStyle = 'rgba(90,154,112,0.5)';
     ctx.lineWidth   = 1.5 / this.zoom;
@@ -2919,7 +2947,7 @@ const CanvasEditor = {
     ctx.moveTo(pt.x, pt.y - c); ctx.lineTo(pt.x, pt.y + c);
     ctx.stroke();
 
-    // Label "Conectar" — badge preto + texto branco
+    // Label "Conectar"
     const fs  = 11 / this.zoom;
     const pad = 4  / this.zoom;
     ctx.font = `600 ${fs}px Inter,sans-serif`;
@@ -2928,11 +2956,11 @@ const CanvasEditor = {
     const tw = ctx.measureText('Conectar').width;
     const bx = pt.x - tw / 2 - pad;
     const by = pt.y - r - fs - pad * 2 - 2 / this.zoom;
-    ctx.fillStyle = 'rgba(10,30,18,0.92)'; // fundo escuro com tom verde
+    ctx.fillStyle = 'rgba(10,30,18,0.92)';
     ctx.beginPath();
     ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
     ctx.fill();
-    ctx.fillStyle = '#5A9A70'; // verde igual ao círculo
+    ctx.fillStyle = '#5A9A70';
     ctx.fillText('Conectar', pt.x, by + fs + pad * 0.75);
     ctx.textBaseline = 'alphabetic';
   },
