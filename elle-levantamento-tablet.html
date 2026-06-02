@@ -4025,6 +4025,14 @@ const CanvasEditor = {
       return;
     }
 
+    // Borracha: inicia o retângulo de seleção
+    if (this.currentTool === 'erase') {
+      this._rubber    = { x1: raw.x, y1: raw.y, x2: raw.x, y2: raw.y };
+      this._rubberIds = [];
+      this._draw();
+      return;
+    }
+
     switch (this.currentTool) {
       case 'dimension':   this._clickDim(raw);      break; // raw para snap arquitetônico
       case 'install':     this._clickInstall(world); break;
@@ -4042,6 +4050,17 @@ const CanvasEditor = {
     if (this.isPanning) {
       this.panX = this.panStart.panX + (e.clientX - this.panStart.mx);
       this.panY = this.panStart.panY + (e.clientY - this.panStart.my);
+      this._draw();
+      return;
+    }
+
+    // Borracha: atualiza o retângulo
+    if (this.currentTool === 'erase' && this._rubber) {
+      const rect = this.canvas.getBoundingClientRect();
+      const cur  = this.toWorld(e.clientX - rect.left, e.clientY - rect.top);
+      this._rubber.x2 = cur.x;
+      this._rubber.y2 = cur.y;
+      this._rubberIds = this._elementsInRect(this._rubber);
       this._draw();
       return;
     }
@@ -4087,6 +4106,24 @@ const CanvasEditor = {
       this.canvas.style.cursor = this.currentTool === 'select' ? 'default' : 'crosshair';
       return;
     }
+
+    // Borracha: confirma exclusão
+    if (this.currentTool === 'erase' && this._rubber) {
+      const ids = this._rubberIds;
+      this._rubber    = null;
+      this._rubberIds = [];
+      if (ids.length > 0) {
+        if (confirm(`Apagar ${ids.length} elemento${ids.length > 1 ? 's' : ''}?`)) {
+          this._pushHistory();
+          this._deleteRubberIds(ids);
+          this._scheduleSave();
+          Toast.show(`${ids.length} elemento${ids.length > 1 ? 's apagados' : ' apagado'}`, 'success');
+        }
+      }
+      this._draw();
+      return;
+    }
+
     if (this.currentTool === 'wall' && this._aiming) { this._wallCommit(); return; }
     if (this._aimingInstall) { this._aimingInstall = false; this._installCommit(); return; }
     if (this._aimingOpening) { this._openingCommit(); }
