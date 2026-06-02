@@ -4524,15 +4524,41 @@ const CanvasEditor = {
   _drawArchSnap(ctx) {
     const pt = this._archSnapPt;
     if (!pt) return;
-    const r = 10 / this.zoom;
 
-    // Ponto preenchido dourado + anel — discreto e alinhado com a cor das cotas
-    ctx.fillStyle   = '#C9A84C';
-    ctx.strokeStyle = 'rgba(201,168,76,0.4)';
-    ctx.lineWidth   = 6 / this.zoom;
-    ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-    ctx.fill();
+    // Risco perpendicular (tick mark) — mostra exatamente de onde parte a cota
+    // O risco é perpendicular à direção da cota (parallel à parede)
+    const tick = 120 / this.zoom; // comprimento do risco em mm
+    const thick = 2.5 / this.zoom;
+    ctx.strokeStyle = '#C9A84C';
+    ctx.lineWidth   = thick;
+    ctx.setLineDash([]);
+
+    // Determina direção do risco: usa a parede mais próxima do snap
+    let tickDx = 1, tickDy = 0; // padrão horizontal
+    const walls = this.project.canvas.walls;
+    let minDist = Infinity;
+    for (const w of walls) {
+      for (const [ex, ey] of [[w.x1,w.y1],[w.x2,w.y2]]) {
+        const d2 = (pt.x-ex)**2+(pt.y-ey)**2;
+        if (d2 < minDist) {
+          minDist = d2;
+          const dx=w.x2-w.x1, dy=w.y2-w.y1;
+          const l=Math.sqrt(dx*dx+dy*dy);
+          if (l>0) { tickDx=dx/l; tickDy=dy/l; }
+        }
+      }
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(pt.x - tickDx*tick, pt.y - tickDy*tick);
+    ctx.lineTo(pt.x + tickDx*tick, pt.y + tickDy*tick);
     ctx.stroke();
+
+    // Ponto central pequeno
+    ctx.fillStyle = '#C9A84C';
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 4/this.zoom, 0, Math.PI*2);
+    ctx.fill();
 
     // Badge de label (Vão / Centro) se existir
     if (pt.label) {
@@ -6148,20 +6174,36 @@ const CanvasEditor = {
 
   // ── Borracha: selecionar e apagar em área ─────────────────────────────
 
-  // Retorna lista de {type, id} para todos os elementos dentro do rect
+  // Retorna lista de {type, id} para todos os elementos que TOCAM o rect (intersecção)
   _elementsInRect(r) {
     const c    = this.project.canvas;
     const minX = Math.min(r.x1, r.x2), maxX = Math.max(r.x1, r.x2);
     const minY = Math.min(r.y1, r.y2), maxY = Math.max(r.y1, r.y2);
     const inside = (x, y) => x >= minX && x <= maxX && y >= minY && y <= maxY;
+
+    // Segmento (ax,ay)→(bx,by) toca o retângulo?
+    const segTouches = (ax, ay, bx, by) => {
+      if (inside(ax,ay) || inside(bx,by)) return true;
+      // Verifica se alguma das 4 arestas do rect é cruzada pelo segmento
+      const segsIntersect = (p1x,p1y,p2x,p2y,p3x,p3y,p4x,p4y) => {
+        const d1x=p2x-p1x,d1y=p2y-p1y,d2x=p4x-p3x,d2y=p4y-p3y;
+        const cross=d1x*d2y-d1y*d2x; if (Math.abs(cross)<1e-9) return false;
+        const t=((p3x-p1x)*d2y-(p3y-p1y)*d2x)/cross;
+        const u=((p3x-p1x)*d1y-(p3y-p1y)*d1x)/cross;
+        return t>=0&&t<=1&&u>=0&&u<=1;
+      };
+      return segsIntersect(ax,ay,bx,by,minX,minY,maxX,minY) ||
+             segsIntersect(ax,ay,bx,by,maxX,minY,maxX,maxY) ||
+             segsIntersect(ax,ay,bx,by,maxX,maxY,minX,maxY) ||
+             segsIntersect(ax,ay,bx,by,minX,maxY,minX,minY);
+    };
+
     const ids = [];
-    // Paredes: AMBOS os endpoints precisam estar dentro (evita selecionar parede ao mirar numa cota)
-    for (const w of (c.walls||[]))         { if (inside(w.x1,w.y1) && inside(w.x2,w.y2)) ids.push({type:'wall',id:w.id}); }
-    // Cotas: basta um endpoint estar dentro
-    for (const d of (c.dimensions||[]))    { if (inside(d.x1,d.y1)||inside(d.x2,d.y2)) ids.push({type:'dim',id:d.id}); }
-    for (const i of (c.installations||[])){ if (inside(i.x,i.y))                        ids.push({type:'inst',id:i.id}); }
-    for (const n of (c.notes||[]))         { if (inside(n.x,n.y))                        ids.push({type:'note',id:n.id}); }
-    for (const p of (c.photoPins||[]))     { if (inside(p.x,p.y))                        ids.push({type:'pin',id:p.id}); }
+    for (const w of (c.walls||[]))         { if (segTouches(w.x1,w.y1,w.x2,w.y2))  ids.push({type:'wall',id:w.id}); }
+    for (const d of (c.dimensions||[]))    { if (segTouches(d.x1,d.y1,d.x2,d.y2))  ids.push({type:'dim',id:d.id}); }
+    for (const i of (c.installations||[])){ if (inside(i.x,i.y))                     ids.push({type:'inst',id:i.id}); }
+    for (const n of (c.notes||[]))         { if (inside(n.x,n.y))                     ids.push({type:'note',id:n.id}); }
+    for (const p of (c.photoPins||[]))     { if (inside(p.x,p.y))                     ids.push({type:'pin',id:p.id}); }
     for (const o of (c.openings||[]))      {
       const w = (c.walls||[]).find(w=>w.id===o.wallId);
       if (w) { const cx=w.x1+(w.x2-w.x1)*o.position, cy=w.y1+(w.y2-w.y1)*o.position; if (inside(cx,cy)) ids.push({type:'opening',id:o.id}); }
