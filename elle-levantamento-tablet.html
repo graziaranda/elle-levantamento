@@ -6535,7 +6535,7 @@ const CanvasEditor = {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', e => {
           const o = findO();
-          if (o) { const v = parseFloat(e.target.value); o[key] = isNaN(v) ? null : Math.round(v * 10); this._scheduleSave(); this._draw(); }
+          if (o) { const v = parseLocaleFloatOrNull(e.target.value); o[key] = v !== null ? Math.round(v * 10) : null; this._scheduleSave(); this._draw(); }
         });
       };
       bindNum('prop-opw', 'width');
@@ -6714,7 +6714,7 @@ const CanvasEditor = {
       });
       document.getElementById('prop-pedireito').addEventListener('change', e => {
         const env = this.project.canvas.environments.find(v => v.id === elem.id);
-        if (env) { env.peDireito = parseFloat(e.target.value) || null; this._scheduleSave(); this._draw(); }
+        if (env) { env.peDireito = parseLocaleFloatOrNull(e.target.value); this._scheduleSave(); this._draw(); }
       });
       document.getElementById('prop-envobs').addEventListener('change', e => {
         const env = this.project.canvas.environments.find(v => v.id === elem.id);
@@ -7266,7 +7266,7 @@ const CanvasEditor = {
     document.getElementById('mc-save').addEventListener('click', () => {
       const name = (document.getElementById('env-name')?.value || '').trim();
       if (!name) return;
-      const pedireito = parseFloat(document.getElementById('env-pedireito')?.value) || null;
+      const pedireito = parseLocaleFloatOrNull(document.getElementById('env-pedireito')?.value);
       this._pushHistory();
       this.project.canvas.environments.push({
         id: generateId(),
@@ -7385,7 +7385,7 @@ const CanvasEditor = {
     document.getElementById('mc').addEventListener('click', () => Modal.close());
     document.getElementById('mc-cancel').addEventListener('click', () => Modal.close());
     document.getElementById('mc-ok').addEventListener('click', () => {
-      const realMm = parseFloat(document.getElementById('calib-dist')?.value);
+      const realMm = parseLocaleFloat(document.getElementById('calib-dist')?.value);
       if (!realMm || realMm <= 0) return;
       const bg  = this.project.canvas.backgroundImage;
       if (!bg) { Modal.close(); return; }
