@@ -7791,6 +7791,76 @@ const CanvasEditor = {
       ctx.fillText(dispLabel, lmx, lmy);
 
       ctx.restore();
+
+      // ── Distâncias às paredes paralelas adjacentes ────────────────────────
+      const PARALLEL_TOL = Math.cos(15 * Math.PI / 180); // paralelo se |cos| > 0.966
+      const ux = dx / len, uy = dy / len; // direção da parede
+      let posNear = null, negNear = null;  // parede mais próxima de cada lado
+
+      for (const w2 of this.project.canvas.walls) {
+        if (w2.id === d.wallId) continue;
+        const dx2 = w2.x2 - w2.x1, dy2 = w2.y2 - w2.y1;
+        const l2  = Math.sqrt(dx2*dx2 + dy2*dy2) || 1;
+        // Paralelismo: produto escalar dos versores de direção
+        if (Math.abs(ux*(dx2/l2) + uy*(dy2/l2)) < PARALLEL_TOL) continue;
+        // Distância com sinal (eixo → eixo) ao longo do vetor normal
+        const m2x = (w2.x1 + w2.x2) / 2, m2y = (w2.y1 + w2.y2) / 2;
+        const sd  = (m2x - mx) * nx + (m2y - my) * ny;
+        if (sd > 0 && (!posNear || sd < posNear.sd)) posNear = { w: w2, sd, m2x, m2y };
+        if (sd < 0 && (!negNear || sd > negNear.sd)) negNear = { w: w2, sd, m2x, m2y };
+      }
+
+      const drawParallelCota = (near) => {
+        const sign    = near.sd > 0 ? 1 : -1;
+        const absSD   = Math.abs(near.sd);
+        const t2      = (near.w.thickness || 150) / 2;
+        // Distância face a face (pode ser negativa se sobrepostas)
+        const faceGap = absSD - thick / 2 - t2;
+        // Pontos da cota: face da parede arrastada → face da parede paralela
+        const fromX   = mx + sign * (thick / 2) * nx;
+        const fromY   = my + sign * (thick / 2) * ny;
+        const toX     = mx + (near.sd - sign * t2) * nx;
+        const toY     = my + (near.sd - sign * t2) * ny;
+        const cmx     = (fromX + toX) / 2, cmy = (fromY + toY) / 2;
+        // Desloca o label para o lado para não sobrepor a linha
+        const offX    = tx * tickLen * 2.5, offY = ty * tickLen * 2.5;
+
+        const fsN = Math.max(11 / this.zoom, 80);
+        const cotaLabel = fmtMm(Math.max(0, faceGap));
+        const isOverlap = faceGap < 0;
+
+        ctx.save();
+        // Linha de cota pontilhada branca
+        ctx.setLineDash([dashLen * 0.6, dashLen * 0.4]);
+        ctx.strokeStyle = isOverlap ? 'rgba(255,80,80,0.8)' : 'rgba(255,255,255,0.7)';
+        ctx.lineWidth   = Math.max(1.2 / this.zoom, 8);
+        ctx.beginPath(); ctx.moveTo(fromX, fromY); ctx.lineTo(toX, toY); ctx.stroke();
+        ctx.setLineDash([]);
+        // Ticks nas faces
+        const tl2 = tickLen * 0.7;
+        for (const [px, py] of [[fromX, fromY], [toX, toY]]) {
+          ctx.beginPath();
+          ctx.moveTo(px + tx*tl2, py + ty*tl2);
+          ctx.lineTo(px - tx*tl2, py - ty*tl2);
+          ctx.stroke();
+        }
+        // Pill com a distância (branca com texto escuro, vermelha se sobreposta)
+        ctx.font = `600 ${fsN}px Inter,sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const twN = ctx.measureText(cotaLabel).width;
+        const padN = fsN * 0.35;
+        ctx.fillStyle = isOverlap ? 'rgba(220,50,50,0.95)' : 'rgba(255,255,255,0.95)';
+        ctx.beginPath();
+        ctx.roundRect(cmx + offX - twN/2 - padN, cmy + offY - fsN/2 - padN*0.5,
+                      twN + padN*2, fsN + padN, fsN*0.2);
+        ctx.fill();
+        ctx.fillStyle = isOverlap ? '#fff' : '#12100e';
+        ctx.fillText(cotaLabel, cmx + offX, cmy + offY);
+        ctx.restore();
+      };
+
+      if (posNear) drawParallelCota(posNear);
+      if (negNear) drawParallelCota(negNear);
     }
   },
 
