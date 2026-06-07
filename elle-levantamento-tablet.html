@@ -4089,13 +4089,13 @@ const CanvasEditor = {
         ctx.textBaseline = 'alphabetic';
       }
 
-      // Símbolo de canto reto (⊾) quando perpendicular à parede anterior
+      // Símbolo de canto reto (⊾) quando perpendicular à parede anterior da cadeia
       if (this._snapIs90 && this._chainPts && this._chainPts.length >= 2) {
-        const prev = this._chainPts[this._chainPts.length - 2];
-        const prevAng = Math.atan2(x1 - prev.x, y1 - prev.y); // perpendicular ao eixo
-        const wallAng = Math.atan2(y2 - y1, x2 - x1);
-        const prevWallAng = Math.atan2(y1 - prev.y, x1 - prev.x);
-        const s = 28 / this.zoom; // tamanho do quadrado
+        const prev        = this._chainPts[this._chainPts.length - 2];
+        const prevWallAng = Math.atan2(y1 - prev.y, x1 - prev.x); // ângulo da parede anterior
+        const wallAng     = Math.atan2(y2 - y1, x2 - x1);         // ângulo da nova parede
+        const s           = 28 / this.zoom;
+        const sign        = Math.sin(wallAng - prevWallAng) >= 0 ? 1 : -1;
 
         ctx.save();
         ctx.translate(x1, y1);
@@ -4103,9 +4103,6 @@ const CanvasEditor = {
         ctx.strokeStyle = '#C9A84C';
         ctx.lineWidth   = 2.5 / this.zoom;
         ctx.setLineDash([]);
-        // Verifica em qual lado o novo segmento vai (cima/baixo do eixo anterior)
-        const cross = Math.sin(wallAng - prevWallAng); // positivo = esquerda, negativo = direita
-        const sign  = cross >= 0 ? 1 : -1;
         ctx.beginPath();
         ctx.moveTo(s, 0);
         ctx.lineTo(s, sign * s);
@@ -4318,18 +4315,20 @@ const CanvasEditor = {
 
     if (this.currentTool === 'wall' && this._aiming) {
       this._wallAim(raw);
-      // Durante o aim: só snap de ENDPOINT (body snap não — interfere no arraste normal)
-      this._wallSnapPt = this._snapToWallEndpoint(raw);
       this._bodySnapPt = null;
-      if (this._wallSnapPt) {
-        this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
-        this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
-                                      this._wallSnapPt.x - this.drawStart.x);
-        this._snapBadge = null;
-        this._snapIs90  = false;
-        this._showHint('Solte para conectar neste ponto');
-      }
       this._archSnapPt = null;
+      // Endpoint snap só se NÃO está fechando (fechamento tem prioridade absoluta)
+      if (!this._aimClosing) {
+        this._wallSnapPt = this._snapToWallEndpoint(raw);
+        if (this._wallSnapPt) {
+          this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
+          this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
+                                        this._wallSnapPt.x - this.drawStart.x);
+          this._snapBadge = null;
+          this._snapIs90  = false;
+          this._showHint('Solte para conectar neste ponto');
+        }
+      }
       this._draw();
       return;
     }
@@ -4514,9 +4513,11 @@ const CanvasEditor = {
       this._aimClosing = true;
       this._aimAngle   = Math.atan2(first.y - a.y, first.x - a.x);
       this.mouseWorld  = { x: first.x, y: first.y };
-      this._showHint('Solte para fechar o ambiente');  // C-06: hint de fechamento
-      this._draw();
-      return;
+      this._wallSnapPt = null; // fechamento tem prioridade — limpa endpoint snap
+      this._snapBadge  = null;
+      this._snapIs90   = false;
+      this._showHint('Solte para fechar o ambiente');
+      return; // caller é responsável por _draw()
     }
 
     if (this._aimClosing) this._showHint('Arraste na direção da parede e solte para digitar a medida');
@@ -4549,14 +4550,13 @@ const CanvasEditor = {
       this.mouseWorld  = tracked.pt;
       this._aimAngle   = Math.atan2(tracked.pt.y - a.y, tracked.pt.x - a.x);
       this._trackSnap  = tracked;
-      this._snapBadge  = null; // tracking sobrepõe badge de ângulo
+      this._snapBadge  = null;
     } else {
       this._trackSnap  = null;
-      // Badge de ângulo travado — C-07
       const snapped = ang !== rawAng;
       this._snapBadge = snapped ? this._angleLabel(ang) : null;
     }
-    this._draw();
+    // caller é responsável por _draw()
   },
 
   // Object Snap Tracking: alinha cursor H ou V com endpoints de paredes existentes.
@@ -4670,9 +4670,13 @@ const CanvasEditor = {
     this._aimClosing = false;
     this._aimAngle   = null;
     this._snapBadge  = null;
+    this._snapIs90   = false;
+    this._wallSnapPt = null;
+    this._bodySnapPt = null;
+    this._trackSnap  = null;
     this._updateCancelBtn();
     this._updateWallActions();
-    this._updateUndoRedo();  // btn-undo reaparece ao sair da cadeia
+    this._updateUndoRedo();
     this._showHint('Toque para marcar o início da parede');
   },
 
@@ -6764,16 +6768,18 @@ const CanvasEditor = {
       // Parede: arrastar 1 dedo mira a direção (trava em 90°/45°)
       if (this.currentTool === 'wall' && this._aiming) {
         this._wallAim(raw);
-        // Durante o aim: só snap de ENDPOINT (body snap fora — interfere no arraste)
-        this._wallSnapPt = this._snapToWallEndpoint(raw);
         this._bodySnapPt = null;
-        if (this._wallSnapPt) {
-          this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
-          this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
-                                        this._wallSnapPt.x - this.drawStart.x);
-          this._snapBadge = null;
-          this._snapIs90  = false;
-          this._showHint('Solte para conectar neste ponto');
+        // Endpoint snap só se NÃO está fechando (fechamento tem prioridade absoluta)
+        if (!this._aimClosing) {
+          this._wallSnapPt = this._snapToWallEndpoint(raw);
+          if (this._wallSnapPt) {
+            this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
+            this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
+                                          this._wallSnapPt.x - this.drawStart.x);
+            this._snapBadge = null;
+            this._snapIs90  = false;
+            this._showHint('Solte para conectar neste ponto');
+          }
         }
         this._draw();
         this._touches = Array.from(e.touches);
@@ -6909,12 +6915,14 @@ const CanvasEditor = {
           } else {
             this._aiming = true;
             this._wallAim(raw);
-            // Snap de conexão usa raw (posição bruta) para não ser desviado pelo angle-snap
-            this._wallSnapPt = this._snapToWallEndpoint(raw);
-            if (this._wallSnapPt) {
-              this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
-              this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
-                                            this._wallSnapPt.x - this.drawStart.x);
+            // Endpoint snap só se NÃO está fechando (fechamento tem prioridade absoluta)
+            if (!this._aimClosing) {
+              this._wallSnapPt = this._snapToWallEndpoint(raw);
+              if (this._wallSnapPt) {
+                this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
+                this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
+                                              this._wallSnapPt.x - this.drawStart.x);
+              }
             }
             this._wallCommit();
           }
