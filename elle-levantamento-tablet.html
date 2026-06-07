@@ -5920,12 +5920,13 @@ const CanvasEditor = {
       syncPreview(type, distCm);
 
       // Campos abrem o numpad do app (não teclado nativo) ao tocar
+      // setTimeout 50ms: evita que o click pós-pointerup chegue no backdrop e feche o numpad
       const distWrap = document.getElementById('inst-dist-wrap');
       if (distWrap) {
         distWrap.addEventListener('pointerup', ev => {
           ev.stopPropagation();
           const el = document.getElementById('inst-dist');
-          this._numpad({
+          setTimeout(() => this._numpad({
             title: 'Distância do canto (cm)',
             unit:  'cm',
             value: el?.value || String(distCm),
@@ -5933,7 +5934,7 @@ const CanvasEditor = {
               if (el) el.value = val;
               syncPreview(selectedType, val);
             },
-          });
+          }), 50);
         });
       }
 
@@ -5942,12 +5943,12 @@ const CanvasEditor = {
         hWrap.addEventListener('pointerup', ev => {
           ev.stopPropagation();
           const el = document.getElementById('inst-height');
-          this._numpad({
+          setTimeout(() => this._numpad({
             title: 'Altura do piso (cm)',
             unit:  'cm',
             value: el?.value || defH,
             onOk:  val => { if (el) el.value = val; },
-          });
+          }), 50);
         });
       }
     };
@@ -6045,12 +6046,13 @@ const CanvasEditor = {
     const faceOffset = (wall.thickness || 150) / 2;
     data.distCm = Math.max(0, Math.round((centerMm - data.width / 2 - faceOffset) / 10));
 
+    // Campos readonly — abre numpad do app ao tocar (sem teclado nativo Android)
     const numField = (key, label, val) => `
       <div class="form-group">
         <label class="form-label">${label}</label>
-        <div class="op-input-wrap">
-          <input class="form-input op-num" id="op-${key}" inputmode="numeric" type="text"
-            value="${val}" style="-webkit-user-select:text;user-select:text;">
+        <div class="op-input-wrap" style="cursor:pointer;" id="op-wrap-${key}">
+          <input class="form-input op-num" id="op-${key}" readonly type="text"
+            style="cursor:pointer;caret-color:transparent;" value="${val}">
           <span class="op-unit">cm</span>
         </div>
       </div>`;
@@ -6075,8 +6077,14 @@ const CanvasEditor = {
       </div>
       <div class="op-body">
         ${numField('width', 'Largura (vão)', cm(data.width))}
-        ${numField('dist',  'Distância do canto até o vão', data.distCm)}
-        <button type="button" class="op-flip" id="op-flip">⇄ Medir a partir do outro canto</button>
+        <div class="form-group">
+          <label class="form-label">Medir a partir do canto</label>
+          <div class="op-seg" id="op-corner-seg">
+            <button type="button" data-val="start" class="${data.fromEnd === 'start' ? 'active' : ''}">← Início da parede</button>
+            <button type="button" data-val="end"   class="${data.fromEnd === 'end'   ? 'active' : ''}">Final da parede →</button>
+          </div>
+        </div>
+        ${numField('dist', 'Distância do canto até o vão', data.distCm)}
         ${numField('height', 'Altura', cm(data.height))}
         ${!isDoor ? numField('sill', 'Peitoril (piso até a janela)', cm(data.sill)) : ''}
         ${isDoor ? `
@@ -6170,9 +6178,24 @@ const CanvasEditor = {
     const panel = panelEl;
     if (!panel) return;
 
-    ['op-width', 'op-dist', 'op-height', 'op-sill'].forEach(id => {
-      panel.querySelector(`#${id}`)?.addEventListener('input', sync);
-    });
+    // Campos readonly → numpad do app (setTimeout 50ms evita fechar instantâneo)
+    const attachNumpad = (wrapId, inputId, title, numpadUnit) => {
+      const wrap = panel.querySelector(`#${wrapId}`);
+      if (!wrap) return;
+      wrap.addEventListener('pointerup', ev => {
+        ev.stopPropagation();
+        const el = panel.querySelector(`#${inputId}`);
+        setTimeout(() => this._numpad({
+          title, unit: numpadUnit || 'cm',
+          value: el?.value || '',
+          onOk: val => { if (el) el.value = val; sync(); },
+        }), 50);
+      });
+    };
+    attachNumpad('op-wrap-width',  'op-width',  'Largura do vão (cm)');
+    attachNumpad('op-wrap-dist',   'op-dist',   'Distância do canto (cm)');
+    attachNumpad('op-wrap-height', 'op-height', 'Altura (cm)');
+    if (!isDoor) attachNumpad('op-wrap-sill', 'op-sill', 'Peitoril — piso até a janela (cm)');
 
     panel.addEventListener('pointerup', e => {
       const btn = e.target.closest('button');
@@ -6184,11 +6207,22 @@ const CanvasEditor = {
 
       if (id === 'op-x' || id === 'op-cancel') { closeForm(); return; }
       if (id === 'op-save')                     { saveOpening(); return; }
-      if (id === 'op-flip') {
-        data.fromEnd = data.fromEnd === 'start' ? 'end' : 'start';
+
+      // Seletor visual de canto (substitui op-flip)
+      if (seg?.id === 'op-corner-seg') {
+        const newEnd = btn.dataset.val; // 'start' ou 'end'
+        if (newEnd === data.fromEnd) return; // já estava selecionado
+        // Recalcula distância para o novo canto
+        const oldDmm = readCm('op-dist');
+        const wMm    = readCm('op-width') || 800;
+        const newDmm = Math.max(0, Math.round(wallLen - oldDmm * 10 - wMm) / 10);
+        const distEl = panel.querySelector('#op-dist');
+        if (distEl) distEl.value = Math.round(newDmm);
+        data.fromEnd = newEnd;
+        seg.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.val === newEnd));
         const hint = panel.querySelector('.op-ref-hint');
         if (hint) hint.lastChild.textContent =
-          ` Canto ${data.fromEnd === 'start' ? 'inicial' : 'final'} (verde) = referência`;
+          ` Canto ${newEnd === 'start' ? 'inicial' : 'final'} (verde) = referência`;
         sync();
         return;
       }
