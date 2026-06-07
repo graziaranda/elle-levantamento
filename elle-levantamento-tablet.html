@@ -4044,15 +4044,17 @@ const CanvasEditor = {
     }
 
     if (this.currentTool === 'wall') {
-      ctx.strokeStyle = 'rgba(201,168,76,0.65)';
+      // Preview tracejado: lineCap 'butt' garante gaps visíveis independente da largura
+      ctx.strokeStyle = 'rgba(201,168,76,0.7)';
       ctx.lineWidth   = 150;
-      ctx.lineCap     = 'square';
-      ctx.setLineDash([25 / this.zoom, 10 / this.zoom]); // dash ~25px, gap ~10px na tela
+      ctx.lineCap     = 'butt';
+      ctx.setLineDash([40 / this.zoom, 18 / this.zoom]); // 40px dash · 18px gap na tela
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.lineCap = 'square'; // restaura padrão
 
       // Length label
       const len = dist(x1, y1, x2, y2);
@@ -4551,6 +4553,7 @@ const CanvasEditor = {
       this._aimAngle   = Math.atan2(tracked.pt.y - a.y, tracked.pt.x - a.x);
       this._trackSnap  = tracked;
       this._snapBadge  = null;
+      this._snapIs90   = false; // tracking sobrescreve ângulo — símbolo 90° não se aplica
     } else {
       this._trackSnap  = null;
       const snapped = ang !== rawAng;
