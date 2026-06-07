@@ -5358,12 +5358,12 @@ const CanvasEditor = {
     const w = this.project.canvas.walls.find(w => w.id === pl.wallId);
     if (!w) return;
 
-    // Parede realçada
+    // Parede realçada — halo fino sem caps arredondados gigantes
     ctx.save();
-    ctx.globalAlpha = 0.3;
+    ctx.globalAlpha = 0.25;
     ctx.strokeStyle = '#C9A84C';
-    ctx.lineWidth   = (w.thickness || 150) + 70 / this.zoom;
-    ctx.lineCap     = 'round';
+    ctx.lineWidth   = (w.thickness || 150) + 30 / this.zoom;
+    ctx.lineCap     = 'butt';
     ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
     ctx.restore();
 
@@ -6101,15 +6101,19 @@ const CanvasEditor = {
     };
 
     const computePosition = () => {
-      const width = readCm('op-width') || 1;
-      const distM = readCm('op-dist');
-      // Somar faceOffset: o usuário digita da face acabada, não do eixo
-      const faceMm = (wall.thickness || 150) / 2;
+      // Largura nunca maior que a parede — previne abertura ultrapassando os limites
+      const rawWidth = readCm('op-width') || 1;
+      const width    = Math.min(rawWidth, wallLen);
+      const distM    = readCm('op-dist');
+      const faceMm   = (wall.thickness || 150) / 2;
       let centerFromStart = (data.fromEnd === 'start')
         ? distM + width / 2 + faceMm
         : wallLen - (distM + width / 2 + faceMm);
       const minC = width / 2, maxC = wallLen - width / 2;
-      centerFromStart = Math.max(minC, Math.min(maxC, centerFromStart));
+      // Quando width == wallLen, minC == maxC == wallLen/2 → força centro
+      centerFromStart = minC <= maxC
+        ? Math.max(minC, Math.min(maxC, centerFromStart))
+        : wallLen / 2;
       return wallLen > 0 ? centerFromStart / wallLen : 0.5;
     };
 
@@ -6133,8 +6137,14 @@ const CanvasEditor = {
     const closeForm    = () => { clearPreview(); this._closeSidePanel(); this._draw(); };
 
     const saveOpening = () => {
-      const width = readCm('op-width');
+      let width = readCm('op-width');
       if (!width || width <= 0) { Toast.show('Informe a largura', 'error'); return; }
+      if (width > wallLen) {
+        width = Math.round(wallLen);
+        const wEl = panel.querySelector('#op-width');
+        if (wEl) wEl.value = Math.round(wallLen / 10);
+        Toast.show(`Largura ajustada para ${fmtMm(wallLen)} — limite da parede`, 'info');
+      }
       const opening = {
         id: generateId(), type, wallId: wall.id, position: computePosition(),
         width, height: readCm('op-height') || null,
