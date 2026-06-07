@@ -4592,16 +4592,19 @@ const CanvasEditor = {
   },
 
   // Converte ângulo em radianos para label legível do snap (C-07)
-  _angleLabel(ang) {
+  _angleLabel(ang, isPerp) {
+    // isPerp = true → snap foi perpendicular à parede anterior (relativo)
+    // isPerp = false → snap foi para ângulo absoluto (horizontal/vertical/45°)
+    if (isPerp) return '⊥ 90°'; // perpendicular à parede anterior — clareza máxima
     const deg = Math.round(((ang * 180 / Math.PI) % 360 + 360) % 360);
-    if (deg <= 14 || deg >= 346) return '0°';
-    if (deg >= 76 && deg <= 104) return '90°';
-    if (deg >= 166 && deg <= 194) return '180°';
-    if (deg >= 256 && deg <= 284) return '90°';
-    if (deg >= 31 && deg <= 59)  return '45°';
-    if (deg >= 121 && deg <= 149) return '45°';
-    if (deg >= 211 && deg <= 239) return '45°';
-    if (deg >= 301 && deg <= 329) return '45°';
+    if (deg <= 8 || deg >= 352)   return '0°';
+    if (deg >= 82 && deg <= 98)   return '90°';
+    if (deg >= 172 && deg <= 188) return '180°';
+    if (deg >= 262 && deg <= 278) return '270°'; // NÃO chama de 90°— é vertical para baixo
+    if (deg >= 37 && deg <= 53)   return '45°';
+    if (deg >= 127 && deg <= 143) return '135°';
+    if (deg >= 217 && deg <= 233) return '225°';
+    if (deg >= 307 && deg <= 323) return '315°';
     return null;
   },
 
@@ -4609,16 +4612,21 @@ const CanvasEditor = {
     const TWO = Math.PI * 2;
     const norm = a => { a %= TWO; if (a > Math.PI) a -= TWO; if (a < -Math.PI) a += TWO; return a; };
     const d2r = d => d * Math.PI / 180;
-    // Snap perpendicular à parede anterior da cadeia (prioridade máxima)
+    // Snap perpendicular à parede anterior da cadeia (prioridade máxima, 14° de tolerância)
     if (prevAng != null) {
       for (const offset of [Math.PI / 2, -Math.PI / 2]) {
         const target = norm(prevAng + offset);
         if (Math.abs(norm(ang - target)) <= d2r(14)) return target;
       }
+      // Paralela à parede anterior (0° e 180°) com tolerância menor
+      for (const offset of [0, Math.PI]) {
+        const target = norm(prevAng + offset);
+        if (Math.abs(norm(ang - target)) <= d2r(8)) return target;
+      }
     }
-    // 90° absoluto tem tolerância maior (mais comum); 45° tolerância menor
-    for (const t of [0, 90, 180, -90, -180]) if (Math.abs(norm(ang - d2r(t))) <= d2r(14)) return d2r(t);
-    for (const t of [45, 135, -45, -135])    if (Math.abs(norm(ang - d2r(t))) <= d2r(7))  return d2r(t);
+    // Ângulos absolutos — tolerância 8° (antes era 14°, causava "90° travado")
+    for (const t of [0, 90, 180, -90, -180]) if (Math.abs(norm(ang - d2r(t))) <= d2r(8)) return d2r(t);
+    for (const t of [45, 135, -45, -135])    if (Math.abs(norm(ang - d2r(t))) <= d2r(6)) return d2r(t);
     return ang; // ângulo livre
   },
 
@@ -4676,7 +4684,7 @@ const CanvasEditor = {
     } else {
       this._trackSnap  = null;
       const snapped = ang !== rawAng;
-      this._snapBadge = snapped ? this._angleLabel(ang) : null;
+      this._snapBadge = snapped ? this._angleLabel(ang, this._snapIs90) : null;
     }
     // caller é responsável por _draw()
   },
@@ -4755,8 +4763,8 @@ const CanvasEditor = {
 
   // Snap automático de ponta: se há um endpoint existente dentro de R mm, gruda nele.
   // Garante que paredes realmente se tocam mesmo se o dedo ficou ligeiramente off.
-  _snapEndpointOnCommit(pt, excludeWallId) {
-    const R = 200; // 20cm — margem generosa mas não captura paredes distantes
+  _snapEndpointOnCommit(pt, excludeWallId, radiusMm) {
+    const R = radiusMm || 100; // padrão 10cm — gruda só em endpoints muito próximos
     let best = null, bestD = Infinity;
     for (const w of this.project.canvas.walls) {
       if (w.id === excludeWallId) continue;
@@ -4779,17 +4787,16 @@ const CanvasEditor = {
       end = { x: a.x + dirX * lenMm, y: a.y + dirY * lenMm };
     }
 
-    // Auto-snap: gruda start e end em endpoints existentes próximos (≤20cm)
-    // Evita gaps invisíveis entre paredes que parecem conectadas mas não estão
-    const newId = generateId();
-    const startSnapped = this._snapEndpointOnCommit(a, null);
-    const endSnapped   = closing ? end : this._snapEndpointOnCommit(end, null);
+    // Auto-snap do END apenas (não do start — start já está correto pelo anchor/bodysnap)
+    // Raio 100mm: gruda a ponta final em endpoints muito próximos sem pular para cantos errados
+    const newId    = generateId();
+    const endSnapped = closing ? end : this._snapEndpointOnCommit(end, null, 100);
 
     this._pushHistory();
     this.project.canvas.walls.push({
       id: newId,
-      x1: startSnapped.x, y1: startSnapped.y,
-      x2: endSnapped.x,   y2: endSnapped.y,
+      x1: a.x,          y1: a.y,
+      x2: endSnapped.x,  y2: endSnapped.y,
       thickness: 150,
     });
 
@@ -4800,7 +4807,7 @@ const CanvasEditor = {
       this._draw();
       this._promptEnvironment(pts);
     } else {
-      this._chainPts.push({ x: endSnapped.x, y: endSnapped.y });
+      this._chainPts.push(endSnapped);
       this.drawStart  = endSnapped;
       this.mouseWorld = endSnapped;
       this._aimAngle  = null;
