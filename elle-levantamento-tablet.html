@@ -4215,9 +4215,17 @@ const CanvasEditor = {
 
     if (this.currentTool === 'wall' && this._aiming) {
       this._wallAim(raw);
-      // Mostrar "Conectar" também durante o aim — quando o endpoint apontado
-      // está perto de um endpoint existente (para fechar o ambiente ou conectar)
+      // Conectar: snap magnético a endpoints existentes durante o aim
       this._wallSnapPt = this._snapToWallEndpoint(this.mouseWorld || raw);
+      if (this._wallSnapPt) {
+        // Trava mouseWorld e ângulo exatamente no endpoint existente
+        this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
+        this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
+                                      this._wallSnapPt.x - this.drawStart.x);
+        this._snapBadge = null;
+        this._snapIs90  = false;
+        this._showHint('Solte para conectar neste ponto');
+      }
       this._archSnapPt = null;
       this._draw();
       return;
@@ -4481,10 +4489,11 @@ const CanvasEditor = {
   // Solta o arraste → pede o comprimento
   _wallCommit() {
     if (!this.drawStart || this._aimAngle == null) { this._aiming = false; return; }
-    const a       = this.drawStart;
-    const closing = !!this._aimClosing;
-    const dirX    = Math.cos(this._aimAngle);
-    const dirY    = Math.sin(this._aimAngle);
+    const a          = this.drawStart;
+    const closing    = !!this._aimClosing;
+    const snapTarget = this._wallSnapPt ? { x: this._wallSnapPt.x, y: this._wallSnapPt.y } : null;
+    const dirX       = Math.cos(this._aimAngle);
+    const dirY       = Math.sin(this._aimAngle);
 
     let measured;
     if (closing) {
@@ -4502,21 +4511,27 @@ const CanvasEditor = {
     const mDefault = measured > 0 ? (measured / 1000).toFixed(2).replace('.', ',') : '';
 
     this._numpad({
-      title: closing ? 'Fechar ambiente — comprimento (m)' : 'Comprimento da parede (m)',
-      hint:  closing ? 'Esta parede fecha o contorno do ambiente'
-                     : 'Direção travada. Digite a medida da trena.',
+      title: closing    ? 'Fechar ambiente — comprimento (m)'
+           : snapTarget ? 'Conectar — comprimento (m)'
+           :              'Comprimento da parede (m)',
+      hint:  closing    ? 'Esta parede fecha o contorno do ambiente'
+           : snapTarget ? 'Conecta exatamente no ponto existente'
+           :              'Direção travada. Digite a medida da trena.',
       unit:  'm',
       value: mDefault,
-      onOk:  m => this._addWallSegment(a, dirX, dirY, m * 1000, closing),
+      onOk:  m => this._addWallSegment(a, dirX, dirY, m * 1000, closing, snapTarget),
       onCancel: () => { this.mouseWorld = a; this._draw(); },
     });
   },
 
-  _addWallSegment(a, dirX, dirY, lenMm, closing) {
+  _addWallSegment(a, dirX, dirY, lenMm, closing, snapTarget) {
     let end;
     if (closing) {
       const first = this._chainPts[0];
       end = { x: first.x, y: first.y };
+    } else if (snapTarget) {
+      // Conecta exatamente no endpoint existente (sem erro de ponto flutuante)
+      end = { x: snapTarget.x, y: snapTarget.y };
     } else {
       end = { x: a.x + dirX * lenMm, y: a.y + dirY * lenMm };
     }
@@ -6765,6 +6780,13 @@ const CanvasEditor = {
           } else {
             this._aiming = true;
             this._wallAim(raw);
+            // Snap de conexão também no touch (igual ao _onMouseMove)
+            this._wallSnapPt = this._snapToWallEndpoint(this.mouseWorld || raw);
+            if (this._wallSnapPt) {
+              this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
+              this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
+                                            this._wallSnapPt.x - this.drawStart.x);
+            }
             this._wallCommit();
           }
         }
