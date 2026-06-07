@@ -3368,12 +3368,21 @@ const CanvasEditor = {
       ctx.setLineDash([]);
 
       if (env.polygon && env.polygon.length >= 3) {
-        // Centro visual: bounding box do polígono — sempre parece centralizado
-        // mesmo em ambientes com forma irregular (L, diagonal, etc.)
-        const xs = env.polygon.map(p => p.x);
-        const ys = env.polygon.map(p => p.y);
-        const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-        const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        // Centroide geométrico (Shoelace) — fica dentro do polígono para formas simples
+        // Fallback para bbox se área for quase zero (polígono degenerado)
+        const poly = env.polygon;
+        let A = 0, cx = 0, cy = 0;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const cross = poly[j].x * poly[i].y - poly[i].x * poly[j].y;
+          A += cross; cx += (poly[j].x + poly[i].x) * cross; cy += (poly[j].y + poly[i].y) * cross;
+        }
+        A /= 2;
+        if (Math.abs(A) > 1) { cx /= (6 * A); cy /= (6 * A); }
+        else {
+          const xs = poly.map(p => p.x), ys = poly.map(p => p.y);
+          cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+          cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+        }
 
         const fs  = 18 / this.zoom;
         const sel = this.selected?.id === env.id;
@@ -3611,7 +3620,8 @@ const CanvasEditor = {
       const mx  = (w.x1 + w.x2) / 2;
       const my  = (w.y1 + w.y2) / 2;
       let ang = Math.atan2(dy, dx);
-      if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+      // >= cobre parede exatamente vertical para baixo (ang === π/2)
+      if (ang >= Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
 
       const label = fmtMm(len);
 
@@ -3903,7 +3913,8 @@ const CanvasEditor = {
 
       // Normalizar ângulo: texto nunca aparece de cabeça para baixo
       let ang = Math.atan2(dy, dx);
-      if (ang > Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
+      // >= cobre parede exatamente vertical para baixo (ang === π/2)
+      if (ang >= Math.PI / 2 || ang < -Math.PI / 2) ang += Math.PI;
 
       ctx.save();
       ctx.translate(mx, my);
@@ -5538,12 +5549,12 @@ const CanvasEditor = {
     const w = this.project.canvas.walls.find(w => w.id === pl.wallId);
     if (!w) return;
 
-    // Realça a parede
+    // Realça a parede — halo fino (30px na tela) sem cobrir o canvas todo
     ctx.save();
-    ctx.globalAlpha = 0.3;
+    ctx.globalAlpha = 0.25;
     ctx.strokeStyle = '#5B9BD5';
-    ctx.lineWidth   = (w.thickness || 150) + 70 / this.zoom;
-    ctx.lineCap     = 'round';
+    ctx.lineWidth   = (w.thickness || 150) + 30 / this.zoom;
+    ctx.lineCap     = 'butt'; // sem caps arredondadas gigantes
     ctx.beginPath(); ctx.moveTo(w.x1, w.y1); ctx.lineTo(w.x2, w.y2); ctx.stroke();
     ctx.restore();
 
@@ -5561,13 +5572,21 @@ const CanvasEditor = {
       const faceX   = toInstL > 0 ? refX + (toInst.x/toInstL)*faceOff : refX;
       const faceY   = toInstL > 0 ? refY + (toInst.y/toInstL)*faceOff : refY;
 
-      // Ponto azul NA FACE (não no eixo)
+      // Ponto azul NA FACE (não no eixo) + label "ref."
       ctx.strokeStyle = 'rgba(91,155,213,0.4)';
       ctx.lineWidth   = 1.5 / this.zoom;
       ctx.beginPath(); ctx.arc(faceX, faceY, 18 / this.zoom, 0, Math.PI * 2); ctx.stroke();
       ctx.fillStyle = '#5B9BD5';
       ctx.beginPath(); ctx.arc(faceX, faceY, 11 / this.zoom, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = '#1A1814'; ctx.lineWidth = 2 / this.zoom; ctx.stroke();
+      // Label "ref." indicando que este é o canto de referência
+      const rfs = 11 / this.zoom;
+      ctx.font = `700 ${rfs}px Inter,sans-serif`;
+      ctx.fillStyle = '#5B9BD5';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('ref.', faceX, faceY - 14 / this.zoom);
+      ctx.textBaseline = 'alphabetic';
 
       // Cota tracejada FACE → instalação (= o que o usuário digitou)
       const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
