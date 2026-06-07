@@ -5685,7 +5685,10 @@ const CanvasEditor = {
         ctx.lineTo(px + offP.x + perp.x*r, py + offP.y + perp.y*r);
         ctx.stroke();
       }
-      const userMm = Math.max(0, dist(faceX, faceY, ip.x, ip.y));
+      // Distância projetada no eixo da parede (= exatamente o que o usuário digitou)
+      const wallUx = wlen > 0 ? dx/wlen : 0, wallUy = wlen > 0 ? dy/wlen : 1;
+      const projDist = Math.abs((ip.x - refX)*wallUx + (ip.y - refY)*wallUy);
+      const userMm = projDist;
       const lbl = fmtMm(userMm);
       const mx2 = (faceX + ip.x)/2 + offP.x*1.4;
       const my2 = (faceY + ip.y)/2 + offP.y*1.4;
@@ -5971,6 +5974,13 @@ const CanvasEditor = {
       document.getElementById('install-body').innerHTML = `
         <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:16px;">${esc(entry.label)}</div>
         <div class="form-group">
+          <label class="form-label">Medir a partir do canto</label>
+          <div class="op-seg" id="inst-corner-seg">
+            <button type="button" data-val="start" class="${nearStart ? 'active' : ''}">← Início da parede</button>
+            <button type="button" data-val="end"   class="${!nearStart ? 'active' : ''}">Final da parede →</button>
+          </div>
+        </div>
+        <div class="form-group">
           <label class="form-label">Distância do canto até o ponto (cm)</label>
           <div class="op-input-wrap" style="cursor:pointer;" id="inst-dist-wrap">
             <input class="form-input op-num" id="inst-dist" readonly type="text"
@@ -5978,7 +5988,6 @@ const CanvasEditor = {
             <span class="op-unit">cm</span>
           </div>
         </div>
-        <button type="button" class="op-flip" id="inst-flip">⇄ Medir a partir do outro canto</button>
         <div class="form-group">
           <label class="form-label">Altura do piso (cm)</label>
           <div class="op-input-wrap" style="cursor:pointer;" id="inst-height-wrap">
@@ -6052,21 +6061,27 @@ const CanvasEditor = {
         return;
       }
 
-      if (btn.id === 'inst-flip') {
-        // Troca o canto de referência — ponto azul move para o outro extremo da parede
-        nearStart = !nearStart;
+      // Seletor de canto (← Início / Final →)
+      if (btn.closest('#inst-corner-seg')) {
+        const val = btn.dataset.val;
+        if (!val) return;
+        const wasStart = nearStart;
+        nearStart = val === 'start';
         fromEnd   = nearStart ? 'start' : 'end';
-        updateCornerRef();  // move o ponto azul para o novo canto
-        const hint = panel.querySelector('.op-ref-hint');
-        if (hint) hint.lastChild.textContent =
-          ` Canto ${nearStart ? 'inicial' : 'final'} (azul) = referência`;
-        const d = panel.querySelector('#inst-dist');
-        // Recalcular distância a partir do novo canto
-        if (d && selectedType) {
-          const oldDmm = parseLocaleFloat(d.value) * 10;
-          const newDmm = wallLen - oldDmm;
-          d.value = Math.max(0, Math.round(newDmm / 10));
-          syncPreview(selectedType, d.value);
+        // Atualiza active nos botões
+        btn.closest('#inst-corner-seg').querySelectorAll('button').forEach(b => {
+          b.classList.toggle('active', b.dataset.val === val);
+        });
+        updateCornerRef();
+        // Recalcula distância a partir do novo canto (wallLen - distAntiga)
+        if (wasStart !== nearStart) {
+          const d = panel.querySelector('#inst-dist');
+          if (d) {
+            const oldDmm = parseLocaleFloat(d.value) * 10;
+            const newDmm = Math.max(0, wallLen - oldDmm);
+            d.value = Math.max(0, Math.round(newDmm / 10));
+            if (selectedType) syncPreview(selectedType, d.value);
+          }
         }
         this._draw();
         return;
