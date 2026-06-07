@@ -2902,8 +2902,8 @@ const CanvasEditor = {
   // Só ativa se NÃO há endpoint snap ativo (endpoint tem prioridade).
   _snapToWallBody(rawWorld) {
     if (this._wallSnapPt) return null; // endpoint tem prioridade
-    const THRESH = 18 / this.zoom;     // 18px de tela
-    const EP_EXCL = 50 / this.zoom;    // ignora zona dos endpoints (já coberta pelo endpoint snap)
+    const THRESH = 10 / this.zoom;     // 10px — conservador para não pegar paredes indesejadas
+    const EP_EXCL = 80 / this.zoom;    // exclui 80px ao redor de cada endpoint
     let best = null, bestD = Infinity;
     for (const w of this.project.canvas.walls) {
       const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
@@ -4318,24 +4318,16 @@ const CanvasEditor = {
 
     if (this.currentTool === 'wall' && this._aiming) {
       this._wallAim(raw);
-      // Conectar: usa posição BRUTA do cursor (não a snapped por ângulo)
+      // Durante o aim: só snap de ENDPOINT (body snap não — interfere no arraste normal)
       this._wallSnapPt = this._snapToWallEndpoint(raw);
-      this._bodySnapPt = this._snapToWallBody(raw);
+      this._bodySnapPt = null;
       if (this._wallSnapPt) {
         this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
         this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
                                       this._wallSnapPt.x - this.drawStart.x);
         this._snapBadge = null;
         this._snapIs90  = false;
-        this._bodySnapPt = null;
         this._showHint('Solte para conectar neste ponto');
-      } else if (this._bodySnapPt) {
-        this.mouseWorld = { x: this._bodySnapPt.pt.x, y: this._bodySnapPt.pt.y };
-        this._aimAngle  = Math.atan2(this._bodySnapPt.pt.y - this.drawStart.y,
-                                      this._bodySnapPt.pt.x - this.drawStart.x);
-        this._snapBadge = null;
-        this._snapIs90  = false;
-        this._showHint('Solte para encaixar na parede');
       }
       this._archSnapPt = null;
       this._draw();
@@ -6772,23 +6764,16 @@ const CanvasEditor = {
       // Parede: arrastar 1 dedo mira a direção (trava em 90°/45°)
       if (this.currentTool === 'wall' && this._aiming) {
         this._wallAim(raw);
+        // Durante o aim: só snap de ENDPOINT (body snap fora — interfere no arraste)
         this._wallSnapPt = this._snapToWallEndpoint(raw);
-        this._bodySnapPt = this._snapToWallBody(raw);
+        this._bodySnapPt = null;
         if (this._wallSnapPt) {
           this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
           this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
                                         this._wallSnapPt.x - this.drawStart.x);
           this._snapBadge = null;
           this._snapIs90  = false;
-          this._bodySnapPt = null;
           this._showHint('Solte para conectar neste ponto');
-        } else if (this._bodySnapPt) {
-          this.mouseWorld = { x: this._bodySnapPt.pt.x, y: this._bodySnapPt.pt.y };
-          this._aimAngle  = Math.atan2(this._bodySnapPt.pt.y - this.drawStart.y,
-                                        this._bodySnapPt.pt.x - this.drawStart.x);
-          this._snapBadge = null;
-          this._snapIs90  = false;
-          this._showHint('Solte para encaixar na parede');
         }
         this._draw();
         this._touches = Array.from(e.touches);
