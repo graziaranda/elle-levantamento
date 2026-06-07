@@ -2882,9 +2882,9 @@ const CanvasEditor = {
 
   // ── Snap magnético para endpoints de parede ──────────────────────────────
   // Usado quando o usuário está prestes a marcar o início de uma nova parede.
-  // Raio grande (24px) para uso com o dedo — evita paredes duplicadas no mesmo ponto.
-  _snapToWallEndpoint(rawWorld) {
-    const R = 24 / this.zoom;
+  // Raio 40px durante o aim (dedo arrastando) para facilitar conexão.
+  _snapToWallEndpoint(rawWorld, radius) {
+    const R = (radius || 40) / this.zoom;
     let best = null, bestD = Infinity;
     for (const w of this.project.canvas.walls) {
       for (const pt of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
@@ -4215,8 +4215,9 @@ const CanvasEditor = {
 
     if (this.currentTool === 'wall' && this._aiming) {
       this._wallAim(raw);
-      // Conectar: snap magnético a endpoints existentes durante o aim
-      this._wallSnapPt = this._snapToWallEndpoint(this.mouseWorld || raw);
+      // Conectar: usa posição BRUTA do cursor (não a snapped por ângulo)
+      // pois o ângulo-snap pode desviar mouseWorld para longe do endpoint
+      this._wallSnapPt = this._snapToWallEndpoint(raw);
       if (this._wallSnapPt) {
         // Trava mouseWorld e ângulo exatamente no endpoint existente
         this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
@@ -6680,7 +6681,8 @@ const CanvasEditor = {
         if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
       } else if (this.currentTool === 'wall') {
         // "Conectar" aparece tanto antes do 1º ponto quanto durante o aim
-        this._wallSnapPt = this._snapToWallEndpoint(this._aiming ? (this.mouseWorld || raw) : raw);
+        // Sempre usa raw para não ser desviado pelo angle-snap
+        this._wallSnapPt = this._snapToWallEndpoint(raw);
         this._archSnapPt = null;
         if (this._wallSnapPt && !this.drawStart) {
           this.mouseWorld = this._wallSnapPt;
@@ -6780,8 +6782,8 @@ const CanvasEditor = {
           } else {
             this._aiming = true;
             this._wallAim(raw);
-            // Snap de conexão também no touch (igual ao _onMouseMove)
-            this._wallSnapPt = this._snapToWallEndpoint(this.mouseWorld || raw);
+            // Snap de conexão usa raw (posição bruta) para não ser desviado pelo angle-snap
+            this._wallSnapPt = this._snapToWallEndpoint(raw);
             if (this._wallSnapPt) {
               this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
               this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
