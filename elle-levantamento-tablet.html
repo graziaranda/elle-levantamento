@@ -2465,6 +2465,7 @@ const CanvasEditor = {
   _snapBadge:  null,   // string do ângulo travado exibida no preview (C-07)
   _archSnapPt: null,   // ponto arquitetônico capturado pelo snap magnético de cota
   _wallSnapPt: null,   // endpoint de parede capturado pelo snap magnético de parede
+  _bodySnapPt: null,   // ponto no corpo da parede (T-junction): {pt, wallId, distA, distB, wall}
   _trackSnap:  null,   // tracking snap ativo (alinhamento H/V com endpoint existente)
   _rubber:     null,   // borracha: { x1,y1,x2,y2 } em world coords
   _rubberIds:  [],     // elementos selecionados pela borracha [{type,id}]
@@ -2787,6 +2788,7 @@ const CanvasEditor = {
     this._wallSnapPt     = null;
     this._trackSnap      = null;
     this._snapIs90       = false;
+    this._bodySnapPt     = null;
     this._rubber         = null;
     this._rubberIds      = [];
     this._updateCancelBtn();
@@ -2893,6 +2895,97 @@ const CanvasEditor = {
       }
     }
     return best;
+  },
+
+  // ── Snap no corpo da parede (T-junction) ─────────────────────────────────
+  // Projeta o cursor na linha da parede. Retorna {pt, wallId, distA, distB, wall} ou null.
+  // Só ativa se NÃO há endpoint snap ativo (endpoint tem prioridade).
+  _snapToWallBody(rawWorld) {
+    if (this._wallSnapPt) return null; // endpoint tem prioridade
+    const THRESH = 18 / this.zoom;     // 18px de tela
+    const EP_EXCL = 50 / this.zoom;    // ignora zona dos endpoints (já coberta pelo endpoint snap)
+    let best = null, bestD = Infinity;
+    for (const w of this.project.canvas.walls) {
+      const dx = w.x2 - w.x1, dy = w.y2 - w.y1;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 1) continue;
+      const t = Math.max(0, Math.min(1,
+        ((rawWorld.x - w.x1) * dx + (rawWorld.y - w.y1) * dy) / lenSq));
+      const px = w.x1 + t * dx, py = w.y1 + t * dy;
+      const d = dist(rawWorld.x, rawWorld.y, px, py);
+      if (d >= THRESH || d >= bestD) continue;
+      const wallLen = Math.sqrt(lenSq);
+      const dA = t * wallLen, dB = (1 - t) * wallLen;
+      // Exclui zona muito próxima dos endpoints (40px cada lado)
+      if (dA < EP_EXCL || dB < EP_EXCL) continue;
+      bestD = d;
+      best = { pt: { x: px, y: py }, wallId: w.id, distA: dA, distB: dB, wall: w };
+    }
+    return best;
+  },
+
+  // Indicador visual do snap no corpo da parede: losango + distâncias aos extremos
+  _drawBodySnap(ctx) {
+    const b = this._bodySnapPt;
+    if (!b) return;
+    const { pt, wall, distA, distB } = b;
+    const s   = 10 / this.zoom;
+    const fs  = 13 / this.zoom;
+    const pad = 4  / this.zoom;
+
+    // Losango verde no ponto de snap
+    ctx.save();
+    ctx.strokeStyle = '#5A9A70';
+    ctx.fillStyle   = 'rgba(90,154,112,0.25)';
+    ctx.lineWidth   = 2 / this.zoom;
+    ctx.beginPath();
+    ctx.moveTo(pt.x,     pt.y - s);
+    ctx.lineTo(pt.x + s, pt.y);
+    ctx.lineTo(pt.x,     pt.y + s);
+    ctx.lineTo(pt.x - s, pt.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Vetores ao longo da parede para posicionar os labels
+    const wallLen = dist(wall.x1, wall.y1, wall.x2, wall.y2);
+    const ux = (wall.x2 - wall.x1) / wallLen;
+    const uy = (wall.y2 - wall.y1) / wallLen;
+    const perpX = -uy, perpY = ux;
+    const offset = 28 / this.zoom;
+
+    ctx.font = `700 ${fs}px Inter,sans-serif`;
+    ctx.textBaseline = 'middle';
+
+    // Label distA (do ponto ao endpoint 1)
+    const lA = fmtMm(distA);
+    const twA = ctx.measureText(lA).width;
+    const mxA = pt.x - ux * distA / 2;
+    const myA = pt.y - uy * distA / 2;
+    const bxA = mxA - twA / 2 - pad, byA = myA + perpY * offset - fs / 2 - pad;
+    ctx.fillStyle = '#5A9A70';
+    ctx.beginPath();
+    ctx.roundRect(bxA, byA, twA + pad * 2, fs + pad * 2, 3 / this.zoom);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText(lA, mxA, myA + perpY * offset);
+
+    // Label distB (do ponto ao endpoint 2)
+    const lB = fmtMm(distB);
+    const twB = ctx.measureText(lB).width;
+    const mxB = pt.x + ux * distB / 2;
+    const myB = pt.y + uy * distB / 2;
+    const bxB = mxB - twB / 2 - pad, byB = myB + perpY * offset - fs / 2 - pad;
+    ctx.fillStyle = '#5A9A70';
+    ctx.beginPath();
+    ctx.roundRect(bxB, byB, twB + pad * 2, fs + pad * 2, 3 / this.zoom);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(lB, mxB, myB + perpY * offset);
+
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   },
 
   // Indicador visual do snap de endpoint: círculo verde + ímã
@@ -3133,6 +3226,7 @@ const CanvasEditor = {
     if (this._installPreview) this._layer('previa-install', () => this._drawInstallPreview(ctx));
     if (this._archSnapPt)     this._layer('snap-arch',      () => this._drawArchSnap(ctx));
     if (this._wallSnapPt)     this._layer('snap-wall',      () => this._drawWallSnap(ctx));
+    if (this._bodySnapPt)     this._layer('snap-body',      () => this._drawBodySnap(ctx));
     if (this._rubber)         this._layer('borracha',       () => this._drawRubber(ctx));
     if (this.drawStart) this._layer('preview', () => this._drawPreview(ctx));
     if (this.currentTool === 'environment') this._layer('preview-amb', () => this._drawEnvPreview(ctx));
@@ -4148,13 +4242,22 @@ const CanvasEditor = {
 
     if (this._handleScaleCalibClick(world)) return;
 
-    // Parede: clica para fixar o início (snap magnético a endpoint existente)
+    // Parede: clica para fixar o início (snap magnético a endpoint ou corpo de parede)
     if (this.currentTool === 'wall') {
       if (!this.drawStart) {
-        // Aplicar snap de endpoint se disponível — impede paredes duplicadas
-        const snapped = this._snapToWallEndpoint(raw);
-        this._wallSnapPt = null;  // limpa indicador ao confirmar
-        this._wallSetAnchor(snapped || world);
+        const snapped  = this._snapToWallEndpoint(raw);
+        const bodySnap = snapped ? null : this._snapToWallBody(raw);
+        this._wallSnapPt = null;
+        if (bodySnap) {
+          // Inicia no corpo da parede: mostra amarrações e ancora
+          this._bodySnapPt = null;
+          this._wallSetAnchor(bodySnap.pt);
+          const lA = fmtMm(bodySnap.distA), lB = fmtMm(bodySnap.distB);
+          Toast.show(`Amarrado: ${lA} de um lado · ${lB} do outro`, 'success');
+        } else {
+          this._bodySnapPt = null;
+          this._wallSetAnchor(snapped || world);
+        }
       } else {
         this._aiming = true; this._wallAim(raw);
       }
@@ -4216,16 +4319,23 @@ const CanvasEditor = {
     if (this.currentTool === 'wall' && this._aiming) {
       this._wallAim(raw);
       // Conectar: usa posição BRUTA do cursor (não a snapped por ângulo)
-      // pois o ângulo-snap pode desviar mouseWorld para longe do endpoint
       this._wallSnapPt = this._snapToWallEndpoint(raw);
+      this._bodySnapPt = this._snapToWallBody(raw);
       if (this._wallSnapPt) {
-        // Trava mouseWorld e ângulo exatamente no endpoint existente
         this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
         this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
                                       this._wallSnapPt.x - this.drawStart.x);
         this._snapBadge = null;
         this._snapIs90  = false;
+        this._bodySnapPt = null;
         this._showHint('Solte para conectar neste ponto');
+      } else if (this._bodySnapPt) {
+        this.mouseWorld = { x: this._bodySnapPt.pt.x, y: this._bodySnapPt.pt.y };
+        this._aimAngle  = Math.atan2(this._bodySnapPt.pt.y - this.drawStart.y,
+                                      this._bodySnapPt.pt.x - this.drawStart.x);
+        this._snapBadge = null;
+        this._snapIs90  = false;
+        this._showHint('Solte para encaixar na parede');
       }
       this._archSnapPt = null;
       this._draw();
@@ -6662,15 +6772,23 @@ const CanvasEditor = {
       // Parede: arrastar 1 dedo mira a direção (trava em 90°/45°)
       if (this.currentTool === 'wall' && this._aiming) {
         this._wallAim(raw);
-        // Conectar: verifica snap de endpoint no destino (igual ao _onMouseMove)
         this._wallSnapPt = this._snapToWallEndpoint(raw);
+        this._bodySnapPt = this._snapToWallBody(raw);
         if (this._wallSnapPt) {
           this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
           this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
                                         this._wallSnapPt.x - this.drawStart.x);
           this._snapBadge = null;
           this._snapIs90  = false;
+          this._bodySnapPt = null;
           this._showHint('Solte para conectar neste ponto');
+        } else if (this._bodySnapPt) {
+          this.mouseWorld = { x: this._bodySnapPt.pt.x, y: this._bodySnapPt.pt.y };
+          this._aimAngle  = Math.atan2(this._bodySnapPt.pt.y - this.drawStart.y,
+                                        this._bodySnapPt.pt.x - this.drawStart.x);
+          this._snapBadge = null;
+          this._snapIs90  = false;
+          this._showHint('Solte para encaixar na parede');
         }
         this._draw();
         this._touches = Array.from(e.touches);
@@ -6691,16 +6809,19 @@ const CanvasEditor = {
         this._wallSnapPt = null;
         if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
       } else if (this.currentTool === 'wall') {
-        // "Conectar" aparece tanto antes do 1º ponto quanto durante o aim
-        // Sempre usa raw para não ser desviado pelo angle-snap
         this._wallSnapPt = this._snapToWallEndpoint(raw);
+        this._bodySnapPt = this._snapToWallBody(raw);
         this._archSnapPt = null;
-        if (this._wallSnapPt && !this.drawStart) {
-          this.mouseWorld = this._wallSnapPt;
+        if (this._wallSnapPt) {
+          this._bodySnapPt = null;
+          if (!this.drawStart) this.mouseWorld = this._wallSnapPt;
+        } else if (this._bodySnapPt && !this.drawStart) {
+          this.mouseWorld = this._bodySnapPt.pt;
         }
       } else {
         this._archSnapPt = null;
         this._wallSnapPt = null;
+        this._bodySnapPt = null;
       }
 
       // Selecionar: arrasto com 1 dedo move o mapa
@@ -6789,7 +6910,17 @@ const CanvasEditor = {
       if (this.currentTool === 'wall') {
         if (!this._handleScaleCalibClick(world)) {
           if (!this.drawStart) {
-            this._wallSetAnchor(world);
+            const snapEP   = this._snapToWallEndpoint(raw);
+            const snapBody = snapEP ? null : this._snapToWallBody(raw);
+            this._wallSnapPt = null;
+            this._bodySnapPt = null;
+            if (snapBody) {
+              this._wallSetAnchor(snapBody.pt);
+              const lA = fmtMm(snapBody.distA), lB = fmtMm(snapBody.distB);
+              Toast.show(`Amarrado: ${lA} de um lado · ${lB} do outro`, 'success');
+            } else {
+              this._wallSetAnchor(snapEP || world);
+            }
           } else {
             this._aiming = true;
             this._wallAim(raw);
