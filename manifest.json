@@ -1,0 +1,17 @@
+{
+  "name": "Elle Levantamento",
+  "short_name": "Levantamento",
+  "description": "App de levantamento arquitetônico para tablet",
+  "start_url": "/elle-levantamento/elle-levantamento-tablet.html",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#1a1814",
+  "theme_color": "#1a1814",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='24' fill='%231a1814'/%3E%3Cpath d='M40 152L96 40l56 112H40z' fill='none' stroke='%23C9A84C' stroke-width='12' stroke-linejoin='round'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

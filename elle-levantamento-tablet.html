@@ -7,8 +7,17 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Elle Levantamento</title>
+  <link rel="manifest" href="/elle-levantamento/manifest.json">
+  <meta name="theme-color" content="#1a1814">
   <!-- Inter: carrega se houver internet; sistema (Helvetica/Roboto) se não houver -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" media="print" onload="this.media='all'">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/elle-levantamento/sw.js', { scope: '/elle-levantamento/' })
+        .then(() => console.log('[SW] registrado'))
+        .catch(e => console.warn('[SW] falhou:', e));
+    }
+  </script>
 <style>
 /* ═══════════════════════════════════════════
    Elle Levantamento — Design System
