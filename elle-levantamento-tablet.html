@@ -2882,6 +2882,70 @@ const CanvasEditor = {
     return { x, y, snapped: false };
   },
 
+  // ── Indicadores de conectividade nos endpoints ───────────────────────────
+  // Verde = endpoint compartilhado (paredes conectadas)
+  // Laranja = endpoint livre (ponta solta — possível gap)
+  _drawEndpointNodes(ctx) {
+    const walls = this.project.canvas.walls;
+    if (!walls.length) return;
+    const CONN_R = 80; // 8cm — raio para considerar "conectado"
+    const r      = 7 / this.zoom;
+
+    // Mapa de todos os endpoints
+    const pts = [];
+    for (const w of walls) {
+      pts.push({ x: w.x1, y: w.y1, wid: w.id });
+      pts.push({ x: w.x2, y: w.y2, wid: w.id });
+    }
+
+    // Para cada endpoint, verificar se algum outro endpoint da mesma posição existe
+    const drawn = new Set();
+    for (let i = 0; i < pts.length; i++) {
+      const key = `${Math.round(pts[i].x)},${Math.round(pts[i].y)}`;
+      if (drawn.has(key)) continue;
+      drawn.add(key);
+
+      let connected = false;
+      for (let j = 0; j < pts.length; j++) {
+        if (i === j) continue;
+        if (dist(pts[i].x, pts[i].y, pts[j].x, pts[j].y) < CONN_R) {
+          connected = true;
+          break;
+        }
+      }
+
+      ctx.save();
+      if (connected) {
+        // Vértice conectado: círculo verde pequeno e discreto
+        ctx.fillStyle   = 'rgba(90,154,112,0.7)';
+        ctx.strokeStyle = 'rgba(90,154,112,0.9)';
+        ctx.lineWidth   = 1.5 / this.zoom;
+        ctx.beginPath();
+        ctx.arc(pts[i].x, pts[i].y, r * 0.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        // Endpoint livre: círculo laranja — alerta de gap
+        ctx.fillStyle   = 'rgba(220,120,40,0.85)';
+        ctx.strokeStyle = 'rgba(220,120,40,1)';
+        ctx.lineWidth   = 2 / this.zoom;
+        ctx.beginPath();
+        ctx.arc(pts[i].x, pts[i].y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // Cruz interna para indicar "aberto"
+        const c = r * 0.5;
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth   = 1.5 / this.zoom;
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x - c, pts[i].y - c); ctx.lineTo(pts[i].x + c, pts[i].y + c);
+        ctx.moveTo(pts[i].x + c, pts[i].y - c); ctx.lineTo(pts[i].x - c, pts[i].y + c);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  },
+
   // ── Snap magnético para endpoints de parede ──────────────────────────────
   // Usado quando o usuário está prestes a marcar o início de uma nova parede.
   // Raio 40px durante o aim (dedo arrastando) para facilitar conexão.
@@ -3224,6 +3288,7 @@ const CanvasEditor = {
     if (this._openingPreview) this._layer('previa-abertura', () => this._drawSingleOpening(ctx, this._openingPreview, true));
     if (this._placingInstall) this._layer('alvo-install',  () => this._drawInstallPlacement(ctx));
     if (this._installPreview) this._layer('previa-install', () => this._drawInstallPreview(ctx));
+    if (this.currentTool === 'wall') this._layer('nodes', () => this._drawEndpointNodes(ctx));
     if (this._archSnapPt)     this._layer('snap-arch',      () => this._drawArchSnap(ctx));
     if (this._wallSnapPt)     this._layer('snap-wall',      () => this._drawWallSnap(ctx));
     if (this._bodySnapPt)     this._layer('snap-body',      () => this._drawBodySnap(ctx));
@@ -4630,35 +4695,56 @@ const CanvasEditor = {
     });
   },
 
+  // Snap automático de ponta: se há um endpoint existente dentro de R mm, gruda nele.
+  // Garante que paredes realmente se tocam mesmo se o dedo ficou ligeiramente off.
+  _snapEndpointOnCommit(pt, excludeWallId) {
+    const R = 200; // 20cm — margem generosa mas não captura paredes distantes
+    let best = null, bestD = Infinity;
+    for (const w of this.project.canvas.walls) {
+      if (w.id === excludeWallId) continue;
+      for (const ep of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
+        const d = dist(pt.x, pt.y, ep.x, ep.y);
+        if (d < R && d < bestD) { bestD = d; best = { x: ep.x, y: ep.y }; }
+      }
+    }
+    return best || pt;
+  },
+
   _addWallSegment(a, dirX, dirY, lenMm, closing, snapTarget) {
     let end;
     if (closing) {
       const first = this._chainPts[0];
       end = { x: first.x, y: first.y };
     } else if (snapTarget) {
-      // Conecta exatamente no endpoint existente (sem erro de ponto flutuante)
       end = { x: snapTarget.x, y: snapTarget.y };
     } else {
       end = { x: a.x + dirX * lenMm, y: a.y + dirY * lenMm };
     }
 
+    // Auto-snap: gruda start e end em endpoints existentes próximos (≤20cm)
+    // Evita gaps invisíveis entre paredes que parecem conectadas mas não estão
+    const newId = generateId();
+    const startSnapped = this._snapEndpointOnCommit(a, null);
+    const endSnapped   = closing ? end : this._snapEndpointOnCommit(end, null);
+
     this._pushHistory();
     this.project.canvas.walls.push({
-      id: generateId(),
-      x1: a.x, y1: a.y, x2: end.x, y2: end.y,
+      id: newId,
+      x1: startSnapped.x, y1: startSnapped.y,
+      x2: endSnapped.x,   y2: endSnapped.y,
       thickness: 150,
     });
 
     if (closing) {
-      const pts = this._chainPts.slice();   // contorno fechado (1º ponto conecta no fim)
+      const pts = this._chainPts.slice();
       this._resetWallChain();
       this._scheduleSave();
       this._draw();
       this._promptEnvironment(pts);
     } else {
-      this._chainPts.push({ x: end.x, y: end.y });
-      this.drawStart  = end;
-      this.mouseWorld = end;
+      this._chainPts.push({ x: endSnapped.x, y: endSnapped.y });
+      this.drawStart  = endSnapped;
+      this.mouseWorld = endSnapped;
       this._aimAngle  = null;
       this._updateWallActions();
       this._scheduleSave();
