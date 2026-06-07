@@ -6662,6 +6662,17 @@ const CanvasEditor = {
       // Parede: arrastar 1 dedo mira a direção (trava em 90°/45°)
       if (this.currentTool === 'wall' && this._aiming) {
         this._wallAim(raw);
+        // Conectar: verifica snap de endpoint no destino (igual ao _onMouseMove)
+        this._wallSnapPt = this._snapToWallEndpoint(raw);
+        if (this._wallSnapPt) {
+          this.mouseWorld = { x: this._wallSnapPt.x, y: this._wallSnapPt.y };
+          this._aimAngle  = Math.atan2(this._wallSnapPt.y - this.drawStart.y,
+                                        this._wallSnapPt.x - this.drawStart.x);
+          this._snapBadge = null;
+          this._snapIs90  = false;
+          this._showHint('Solte para conectar neste ponto');
+        }
+        this._draw();
         this._touches = Array.from(e.touches);
         return;
       }
