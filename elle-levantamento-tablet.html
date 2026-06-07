@@ -7814,48 +7814,48 @@ const CanvasEditor = {
         const sign    = near.sd > 0 ? 1 : -1;
         const absSD   = Math.abs(near.sd);
         const t2      = (near.w.thickness || 150) / 2;
-        // Distância face a face (pode ser negativa se sobrepostas)
-        const faceGap = absSD - thick / 2 - t2;
-        // Pontos da cota: face da parede arrastada → face da parede paralela
-        const fromX   = mx + sign * (thick / 2) * nx;
-        const fromY   = my + sign * (thick / 2) * ny;
-        const toX     = mx + (near.sd - sign * t2) * nx;
-        const toY     = my + (near.sd - sign * t2) * ny;
-        const cmx     = (fromX + toX) / 2, cmy = (fromY + toY) / 2;
-        // Desloca o label para o lado para não sobrepor a linha
-        const offX    = tx * tickLen * 2.5, offY = ty * tickLen * 2.5;
+        const faceGap = absSD - thick / 2 - t2; // face a face (negativo = sobrepostas)
+        // Cota de face a face: da face da parede arrastada até a face da paralela
+        const fromX = mx + sign * (thick / 2) * nx;
+        const fromY = my + sign * (thick / 2) * ny;
+        const toX   = mx + (near.sd - sign * t2) * nx;
+        const toY   = my + (near.sd - sign * t2) * ny;
+        const cmx2  = (fromX + toX) / 2, cmy2 = (fromY + toY) / 2;
 
         const fsN = Math.max(11 / this.zoom, 80);
         const cotaLabel = fmtMm(Math.max(0, faceGap));
         const isOverlap = faceGap < 0;
+        // Offset do label: 60mm perpendicular ao eixo da cota (= ao longo da parede)
+        const lblOff = Math.max(60, 8 / this.zoom);
+        const lx = cmx2 + ux * lblOff, ly = cmy2 + uy * lblOff;
 
         ctx.save();
-        // Linha de cota pontilhada branca
+        // Linha tracejada branca entre as faces
         ctx.setLineDash([dashLen * 0.6, dashLen * 0.4]);
-        ctx.strokeStyle = isOverlap ? 'rgba(255,80,80,0.8)' : 'rgba(255,255,255,0.7)';
-        ctx.lineWidth   = Math.max(1.2 / this.zoom, 8);
+        ctx.strokeStyle = isOverlap ? 'rgba(255,80,80,0.85)' : 'rgba(255,255,255,0.75)';
+        ctx.lineWidth   = Math.max(1.5 / this.zoom, 9);
         ctx.beginPath(); ctx.moveTo(fromX, fromY); ctx.lineTo(toX, toY); ctx.stroke();
         ctx.setLineDash([]);
-        // Ticks nas faces
-        const tl2 = tickLen * 0.7;
+        // Ticks nas faces (ao longo da parede)
+        const tl2 = Math.max(80 / this.zoom, 50);
         for (const [px, py] of [[fromX, fromY], [toX, toY]]) {
           ctx.beginPath();
-          ctx.moveTo(px + tx*tl2, py + ty*tl2);
-          ctx.lineTo(px - tx*tl2, py - ty*tl2);
+          ctx.moveTo(px + ux*tl2, py + uy*tl2);
+          ctx.lineTo(px - ux*tl2, py - uy*tl2);
           ctx.stroke();
         }
-        // Pill com a distância (branca com texto escuro, vermelha se sobreposta)
-        ctx.font = `600 ${fsN}px Inter,sans-serif`;
+        // Pill com distância — centrada no meio da linha de cota
+        ctx.font = `700 ${fsN}px Inter,sans-serif`;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         const twN = ctx.measureText(cotaLabel).width;
-        const padN = fsN * 0.35;
-        ctx.fillStyle = isOverlap ? 'rgba(220,50,50,0.95)' : 'rgba(255,255,255,0.95)';
+        const padN = fsN * 0.38;
+        ctx.fillStyle = isOverlap ? 'rgba(220,50,50,0.97)' : 'rgba(255,255,255,0.97)';
         ctx.beginPath();
-        ctx.roundRect(cmx + offX - twN/2 - padN, cmy + offY - fsN/2 - padN*0.5,
-                      twN + padN*2, fsN + padN, fsN*0.2);
+        ctx.roundRect(lx - twN/2 - padN, ly - fsN/2 - padN*0.5,
+                      twN + padN*2, fsN + padN, fsN*0.22);
         ctx.fill();
         ctx.fillStyle = isOverlap ? '#fff' : '#12100e';
-        ctx.fillText(cotaLabel, cmx + offX, cmy + offY);
+        ctx.fillText(cotaLabel, lx, ly);
         ctx.restore();
       };
 
