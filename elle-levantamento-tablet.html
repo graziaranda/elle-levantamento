@@ -5875,20 +5875,22 @@ const CanvasEditor = {
       const distCm   = this._placingInstall?.initDistCm ?? Math.round(wallT * wallLen / 10);
 
       document.getElementById('install-body').innerHTML = `
-        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;">${esc(entry.label)}</div>
+        <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:16px;">${esc(entry.label)}</div>
         <div class="form-group">
           <label class="form-label">Distância do canto até o ponto (cm)</label>
-          <div class="op-input-wrap">
-            <input class="form-input op-num" id="inst-dist" inputmode="decimal" type="text" value="${distCm}">
+          <div class="op-input-wrap" style="cursor:pointer;" id="inst-dist-wrap">
+            <input class="form-input op-num" id="inst-dist" readonly type="text"
+              style="cursor:pointer;caret-color:transparent;" value="${distCm}">
             <span class="op-unit">cm</span>
           </div>
         </div>
         <button type="button" class="op-flip" id="inst-flip">⇄ Medir a partir do outro canto</button>
         <div class="form-group">
           <label class="form-label">Altura do piso (cm)</label>
-          <div class="op-input-wrap">
-            <input class="form-input op-num" id="inst-height" inputmode="decimal" type="text"
-              value="${defH}" placeholder="${entry.defaultHeight != null ? 'padrão: ' + entry.defaultHeight : '—'}">
+          <div class="op-input-wrap" style="cursor:pointer;" id="inst-height-wrap">
+            <input class="form-input op-num" id="inst-height" readonly type="text"
+              style="cursor:pointer;caret-color:transparent;"
+              value="${defH}" placeholder="${entry.defaultHeight != null ? entry.defaultHeight + ' (padrão)' : '—'}">
             <span class="op-unit">cm</span>
           </div>
         </div>
@@ -5898,7 +5900,37 @@ const CanvasEditor = {
 
       syncPreview(type, distCm);
 
-      // Listeners do passo 2 via event delegation no painel
+      // Campos abrem o numpad do app (não teclado nativo) ao tocar
+      const distWrap = document.getElementById('inst-dist-wrap');
+      if (distWrap) {
+        distWrap.addEventListener('pointerup', ev => {
+          ev.stopPropagation();
+          const el = document.getElementById('inst-dist');
+          this._numpad({
+            title: 'Distância do canto (cm)',
+            unit:  'cm',
+            value: el?.value || String(distCm),
+            onOk:  val => {
+              if (el) el.value = val;
+              syncPreview(selectedType, val);
+            },
+          });
+        });
+      }
+
+      const hWrap = document.getElementById('inst-height-wrap');
+      if (hWrap) {
+        hWrap.addEventListener('pointerup', ev => {
+          ev.stopPropagation();
+          const el = document.getElementById('inst-height');
+          this._numpad({
+            title: 'Altura do piso (cm)',
+            unit:  'cm',
+            value: el?.value || defH,
+            onOk:  val => { if (el) el.value = val; },
+          });
+        });
+      }
     };
 
     if (!panel) return;
@@ -5973,12 +6005,7 @@ const CanvasEditor = {
       }
     });
 
-    // Input sync para prévia ao vivo
-    panel.addEventListener('input', e => {
-      if (e.target.id === 'inst-dist' && selectedType) {
-        syncPreview(selectedType, e.target.value);
-      }
-    });
+    // syncPreview é chamado diretamente pelo numpad (campos são readonly)
 
   },
 
