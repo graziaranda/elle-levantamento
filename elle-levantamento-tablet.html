@@ -4477,9 +4477,14 @@ const CanvasEditor = {
           d._histSaved = true;
         }
         if (d.mode === 'body') {
-          const ddx = raw.x - d.startX, ddy = raw.y - d.startY;
-          sw.x1 = d.origX1 + ddx; sw.y1 = d.origY1 + ddy;
-          sw.x2 = d.origX2 + ddx; sw.y2 = d.origY2 + ddy;
+          // Restrito ao eixo PERPENDICULAR: a parede desliza paralela a si mesma
+          const wdx = d.origX2 - d.origX1, wdy = d.origY2 - d.origY1;
+          const wl  = Math.sqrt(wdx*wdx + wdy*wdy) || 1;
+          const nx  = -wdy/wl, ny = wdx/wl; // vetor perpendicular unitário
+          const rawDx = raw.x - d.startX, rawDy = raw.y - d.startY;
+          const perp  = rawDx * nx + rawDy * ny; // componente perpendicular
+          sw.x1 = d.origX1 + perp * nx; sw.y1 = d.origY1 + perp * ny;
+          sw.x2 = d.origX2 + perp * nx; sw.y2 = d.origY2 + perp * ny;
         } else if (d.mode === 'end1') {
           const sn = this._snapWorld(raw, e.shiftKey);
           sw.x1 = sn.x; sw.y1 = sn.y;
@@ -7129,9 +7134,14 @@ const CanvasEditor = {
             this._pushHistory(); d._histSaved = true;
           }
           if (d.mode === 'body') {
-            const ddx = raw.x - d.startX, ddy = raw.y - d.startY;
-            sw.x1 = d.origX1 + ddx; sw.y1 = d.origY1 + ddy;
-            sw.x2 = d.origX2 + ddx; sw.y2 = d.origY2 + ddy;
+            // Restrito ao eixo PERPENDICULAR: a parede desliza paralela a si mesma
+            const wdx = d.origX2 - d.origX1, wdy = d.origY2 - d.origY1;
+            const wl  = Math.sqrt(wdx*wdx + wdy*wdy) || 1;
+            const nx  = -wdy/wl, ny = wdx/wl;
+            const rawDx = raw.x - d.startX, rawDy = raw.y - d.startY;
+            const perp  = rawDx * nx + rawDy * ny;
+            sw.x1 = d.origX1 + perp * nx; sw.y1 = d.origY1 + perp * ny;
+            sw.x2 = d.origX2 + perp * nx; sw.y2 = d.origY2 + perp * ny;
           } else if (d.mode === 'end1') {
             sw.x1 = raw.x; sw.y1 = raw.y;
           } else {
@@ -7683,76 +7693,88 @@ const CanvasEditor = {
     const mx  = (w.x1 + w.x2) / 2;
     const my  = (w.y1 + w.y2) / 2;
 
-    // --- Label grande do comprimento sobre a parede ---
-    const fs  = Math.max(18 / this.zoom, 120); // mínimo 120mm para ser sempre legível
+    // ── Label comprimento atual ──────────────────────────────────────────────
+    const fs = Math.max(18 / this.zoom, 120);
     ctx.save();
-    ctx.font      = `bold ${fs}px Inter,sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${fs}px Inter,sans-serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const label = fmtMm(len);
-    const tw    = ctx.measureText(label).width;
-    const pad   = fs * 0.4;
-    const yOff  = -(Math.max(w.thickness || 150, 150) / 2 + fs * 0.9);
-    // Pill dourada
+    const tw = ctx.measureText(label).width;
+    const pad = fs * 0.4;
+    const thick = w.thickness || 150;
+    const yOff = -(thick / 2 + fs * 0.9);
     ctx.fillStyle = 'rgba(201,168,76,0.97)';
-    const rx = mx - tw / 2 - pad, ry = my + yOff - fs / 2 - pad * 0.5;
     ctx.beginPath();
-    ctx.roundRect(rx, ry, tw + pad * 2, fs + pad, fs * 0.3);
+    ctx.roundRect(mx - tw/2 - pad, my + yOff - fs/2 - pad*0.5, tw + pad*2, fs + pad, fs*0.3);
     ctx.fill();
     ctx.fillStyle = '#1a1209';
     ctx.fillText(label, mx, my + yOff);
     ctx.restore();
 
-    // --- Cotas horizontais e verticais (modo body drag) ---
+    // ── Cota de deslocamento perpendicular (modo body) ────────────────────────
     if (d.mode === 'body') {
-      const absDx = Math.abs(dx), absDy = Math.abs(dy);
-      const tickLen = Math.max(100 / this.zoom, 60);
-      const dashLen = Math.max(3 / this.zoom, 20);
+      // Vetor perpendicular unitário da parede
+      const wdx = d.origX2 - d.origX1, wdy = d.origY2 - d.origY1;
+      const wl  = Math.sqrt(wdx*wdx + wdy*wdy) || 1;
+      const nx  = -wdy/wl, ny = wdx/wl; // perpendicular
+
+      // Deslocamento perpendicular atual
+      const perp = (w.x1 - d.origX1) * nx + (w.y1 - d.origY1) * ny;
+      if (Math.abs(perp) < 5) return; // sem deslocamento relevante
+
+      // Pontos médios: posição original e posição atual
+      const omx = (d.origX1 + d.origX2) / 2;
+      const omy = (d.origY1 + d.origY2) / 2;
+
+      const tickLen = Math.max(120 / this.zoom, 80);
+      const dashLen = Math.max(4 / this.zoom, 25);
+      const lw = Math.max(2 / this.zoom, 12);
+      const fsS = Math.max(13 / this.zoom, 90);
+
       ctx.save();
-      ctx.setLineDash([dashLen, dashLen]);
-      ctx.strokeStyle = 'rgba(201,168,76,0.7)';
-      ctx.lineWidth   = Math.max(1.5 / this.zoom, 10);
 
-      // Linha horizontal (projeção X)
-      if (absDx > 50) {
-        const hy = Math.max(w.y1, w.y2) + tickLen * 2;
+      // Linha tracejada da posição original até a atual (no meio da parede)
+      ctx.setLineDash([dashLen, dashLen * 0.6]);
+      ctx.strokeStyle = '#C9A84C';
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.moveTo(omx, omy);
+      ctx.lineTo(mx, my);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Ticks nas extremidades
+      const tx = -ny, ty = nx; // direção da parede = ticks perpendiculares à cota
+      for (const [px, py] of [[omx, omy], [mx, my]]) {
         ctx.beginPath();
-        ctx.moveTo(w.x1, hy); ctx.lineTo(w.x2, hy);
+        ctx.moveTo(px + tx * tickLen, py + ty * tickLen);
+        ctx.lineTo(px - tx * tickLen, py - ty * tickLen);
         ctx.stroke();
-        ctx.setLineDash([]);
-        // Ticks
-        ctx.beginPath();
-        ctx.moveTo(w.x1, hy - tickLen); ctx.lineTo(w.x1, hy + tickLen);
-        ctx.moveTo(w.x2, hy - tickLen); ctx.lineTo(w.x2, hy + tickLen);
-        ctx.stroke();
-        // Label
-        const fsS = Math.max(12 / this.zoom, 80);
-        ctx.font = `500 ${fsS}px Inter,sans-serif`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-        ctx.fillStyle = 'rgba(201,168,76,0.9)';
-        ctx.fillText(fmtMm(absDx), (w.x1 + w.x2) / 2, hy + tickLen * 0.5);
       }
 
-      // Linha vertical (projeção Y)
-      if (absDy > 50) {
-        const vx = Math.max(w.x1, w.x2) + tickLen * 2;
-        ctx.setLineDash([dashLen, dashLen]);
-        ctx.strokeStyle = 'rgba(201,168,76,0.7)';
-        ctx.beginPath();
-        ctx.moveTo(vx, w.y1); ctx.lineTo(vx, w.y2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.beginPath();
-        ctx.moveTo(vx - tickLen, w.y1); ctx.lineTo(vx + tickLen, w.y1);
-        ctx.moveTo(vx - tickLen, w.y2); ctx.lineTo(vx + tickLen, w.y2);
-        ctx.stroke();
-        // Label
-        const fsS = Math.max(12 / this.zoom, 80);
-        ctx.font = `500 ${fsS}px Inter,sans-serif`;
-        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'rgba(201,168,76,0.9)';
-        ctx.fillText(fmtMm(absDy), vx + tickLen * 0.5, (w.y1 + w.y2) / 2);
-      }
+      // Ponto de origem (onde a parede estava)
+      ctx.beginPath();
+      ctx.arc(omx, omy, Math.max(5/this.zoom, 35), 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(201,168,76,0.4)';
+      ctx.fill();
+      ctx.strokeStyle = '#C9A84C'; ctx.lineWidth = lw * 0.7;
+      ctx.stroke();
+
+      // Label do deslocamento (pill dourada no meio da linha)
+      const lmx = (omx + mx) / 2 + nx * (thick * 0.8);
+      const lmy = (omy + my) / 2 + ny * (thick * 0.8);
+      const dispLabel = fmtMm(Math.abs(perp));
+      ctx.font = `bold ${fsS}px Inter,sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const tw2 = ctx.measureText(dispLabel).width;
+      const pad2 = fsS * 0.35;
+      ctx.fillStyle = '#C9A84C';
+      ctx.beginPath();
+      ctx.roundRect(lmx - tw2/2 - pad2, lmy - fsS/2 - pad2*0.5, tw2 + pad2*2, fsS + pad2, fsS*0.25);
+      ctx.fill();
+      ctx.fillStyle = '#1a1209';
+      ctx.fillText(dispLabel, lmx, lmy);
+
       ctx.restore();
     }
   },
