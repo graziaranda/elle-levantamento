@@ -2786,6 +2786,7 @@ const CanvasEditor = {
     this._archSnapPt     = null;
     this._wallSnapPt     = null;
     this._trackSnap      = null;
+    this._snapIs90       = false;
     this._rubber         = null;
     this._rubberIds      = [];
     this._updateCancelBtn();
@@ -3993,6 +3994,31 @@ const CanvasEditor = {
         ctx.fillText(this._snapBadge, bx + pad, by + bh / 2);
         ctx.textBaseline = 'alphabetic';
       }
+
+      // Símbolo de canto reto (⊾) quando perpendicular à parede anterior
+      if (this._snapIs90 && this._chainPts && this._chainPts.length >= 2) {
+        const prev = this._chainPts[this._chainPts.length - 2];
+        const prevAng = Math.atan2(x1 - prev.x, y1 - prev.y); // perpendicular ao eixo
+        const wallAng = Math.atan2(y2 - y1, x2 - x1);
+        const prevWallAng = Math.atan2(y1 - prev.y, x1 - prev.x);
+        const s = 28 / this.zoom; // tamanho do quadrado
+
+        ctx.save();
+        ctx.translate(x1, y1);
+        ctx.rotate(prevWallAng);
+        ctx.strokeStyle = '#C9A84C';
+        ctx.lineWidth   = 2.5 / this.zoom;
+        ctx.setLineDash([]);
+        // Verifica em qual lado o novo segmento vai (cima/baixo do eixo anterior)
+        const cross = Math.sin(wallAng - prevWallAng); // positivo = esquerda, negativo = direita
+        const sign  = cross >= 0 ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(s, 0);
+        ctx.lineTo(s, sign * s);
+        ctx.lineTo(0, sign * s);
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     if (this.currentTool === 'dimension') {
@@ -4348,11 +4374,18 @@ const CanvasEditor = {
     return null;
   },
 
-  _snapWallAngle(ang) {
+  _snapWallAngle(ang, prevAng) {
     const TWO = Math.PI * 2;
     const norm = a => { a %= TWO; if (a > Math.PI) a -= TWO; if (a < -Math.PI) a += TWO; return a; };
     const d2r = d => d * Math.PI / 180;
-    // 90° tem tolerância maior (mais comum); 45° tolerância menor
+    // Snap perpendicular à parede anterior da cadeia (prioridade máxima)
+    if (prevAng != null) {
+      for (const offset of [Math.PI / 2, -Math.PI / 2]) {
+        const target = norm(prevAng + offset);
+        if (Math.abs(norm(ang - target)) <= d2r(14)) return target;
+      }
+    }
+    // 90° absoluto tem tolerância maior (mais comum); 45° tolerância menor
     for (const t of [0, 90, 180, -90, -180]) if (Math.abs(norm(ang - d2r(t))) <= d2r(14)) return d2r(t);
     for (const t of [45, 135, -45, -135])    if (Math.abs(norm(ang - d2r(t))) <= d2r(7))  return d2r(t);
     return ang; // ângulo livre
@@ -4378,10 +4411,26 @@ const CanvasEditor = {
     if (this._aimClosing) this._showHint('Arraste na direção da parede e solte para digitar a medida');
     this._aimClosing = false;
     const rawAng = Math.atan2(rawWorld.y - a.y, rawWorld.x - a.x);
-    const ang    = this._snapWallAngle(rawAng);
+
+    // Ângulo da parede anterior na cadeia (para snap perpendicular)
+    let prevAng = null;
+    if (this._chainPts && this._chainPts.length >= 2) {
+      const prev = this._chainPts[this._chainPts.length - 2];
+      prevAng = Math.atan2(a.y - prev.y, a.x - prev.x);
+    }
+
+    const ang    = this._snapWallAngle(rawAng, prevAng);
     const len    = dist(a.x, a.y, rawWorld.x, rawWorld.y);
     this._aimAngle  = ang;
     this.mouseWorld = { x: a.x + Math.cos(ang) * len, y: a.y + Math.sin(ang) * len };
+
+    // Detecta se está em 90° em relação à parede anterior (para símbolo de canto)
+    const TWO = Math.PI * 2;
+    const normA = a => { a %= TWO; if (a > Math.PI) a -= TWO; if (a < -Math.PI) a += TWO; return a; };
+    this._snapIs90 = prevAng != null && (
+      Math.abs(normA(ang - normA(prevAng + Math.PI / 2))) < 0.01 ||
+      Math.abs(normA(ang - normA(prevAng - Math.PI / 2))) < 0.01
+    );
 
     // Object Snap Tracking: snap ao alinhamento H/V com endpoints existentes
     const tracked = this._snapToTracking(a, this.mouseWorld);
