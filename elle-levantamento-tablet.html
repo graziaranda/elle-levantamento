@@ -3651,7 +3651,7 @@ const CanvasEditor = {
     if (this.selected?.type === 'wall') {
       const sw = walls.find(w => w.id === this.selected.id);
       if (sw) {
-        const r = Math.max(10 / this.zoom, 60); // 60mm mínimo, legível em qualquer zoom
+        const r = Math.max(20 / this.zoom, 40); // ≥20px na tela em qualquer zoom
         for (const [px, py] of [[sw.x1, sw.y1], [sw.x2, sw.y2]]) {
           ctx.save();
           ctx.beginPath();
@@ -4443,13 +4443,22 @@ const CanvasEditor = {
     if (this.currentTool === 'select' && this.selected?.type === 'wall') {
       const sw = this.project.canvas.walls.find(w => w.id === this.selected.id);
       if (sw) {
-        const EP = 20 / this.zoom;
-        let mode = 'body';
-        if (dist(raw.x, raw.y, sw.x1, sw.y1) < EP) mode = 'end1';
-        else if (dist(raw.x, raw.y, sw.x2, sw.y2) < EP) mode = 'end2';
-        this._wallDrag = { wallId: sw.id, mode, startX: raw.x, startY: raw.y,
-                           origX1: sw.x1, origY1: sw.y1, origX2: sw.x2, origY2: sw.y2,
-                           _histSaved: false };
+        // Detecção em pixels de tela (independe do zoom)
+        const cRect = this.canvas.getBoundingClientRect();
+        const sx = e.clientX - cRect.left, sy = e.clientY - cRect.top;
+        const EP_PX = 18; // 18px tela = alvo preciso para mouse
+        const s1x = sw.x1 * this.zoom + this.panX, s1y = sw.y1 * this.zoom + this.panY;
+        const s2x = sw.x2 * this.zoom + this.panX, s2y = sw.y2 * this.zoom + this.panY;
+        let mode = null;
+        if      (dist(sx, sy, s1x, s1y) < EP_PX) mode = 'end1';
+        else if (dist(sx, sy, s2x, s2y) < EP_PX) mode = 'end2';
+        else if (this._pointNearSegment(raw, { x: sw.x1, y: sw.y1 },
+                   { x: sw.x2, y: sw.y2 }, 12 / this.zoom))  mode = 'body';
+        if (mode) {
+          this._wallDrag = { wallId: sw.id, mode, startX: raw.x, startY: raw.y,
+                             origX1: sw.x1, origY1: sw.y1, origX2: sw.x2, origY2: sw.y2,
+                             _histSaved: false };
+        }
       }
     }
   },
@@ -7082,11 +7091,17 @@ const CanvasEditor = {
       if (this.currentTool === 'select' && this.selected?.type === 'wall') {
         const sw = this.project.canvas.walls.find(w => w.id === this.selected.id);
         if (sw) {
-          const EP = 35 / this.zoom; // raio maior para dedo
+          // Detecção em pixels de tela — funciona igual em qualquer zoom
+          const sx = e.touches[0].clientX - rect.left;
+          const sy = e.touches[0].clientY - rect.top;
+          const EP_PX = 28; // 28px tela = alvo confortável para dedo
+          const s1x = sw.x1 * this.zoom + this.panX, s1y = sw.y1 * this.zoom + this.panY;
+          const s2x = sw.x2 * this.zoom + this.panX, s2y = sw.y2 * this.zoom + this.panY;
           let mode = null;
-          if (dist(raw.x, raw.y, sw.x1, sw.y1) < EP) mode = 'end1';
-          else if (dist(raw.x, raw.y, sw.x2, sw.y2) < EP) mode = 'end2';
-          else if (this._pointNearSegment(raw, { x: sw.x1, y: sw.y1 }, { x: sw.x2, y: sw.y2 }, EP)) mode = 'body';
+          if      (dist(sx, sy, s1x, s1y) < EP_PX) mode = 'end1';
+          else if (dist(sx, sy, s2x, s2y) < EP_PX) mode = 'end2';
+          else if (this._pointNearSegment(raw, { x: sw.x1, y: sw.y1 },
+                     { x: sw.x2, y: sw.y2 }, 12 / this.zoom)) mode = 'body';
           if (mode) {
             this._wallDrag = { wallId: sw.id, mode, startX: raw.x, startY: raw.y,
                                origX1: sw.x1, origY1: sw.y1, origX2: sw.x2, origY2: sw.y2,
