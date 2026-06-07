@@ -2465,8 +2465,10 @@ const CanvasEditor = {
   _snapBadge:  null,   // string do ângulo travado exibida no preview (C-07)
   _archSnapPt: null,   // ponto arquitetônico capturado pelo snap magnético de cota
   _wallSnapPt: null,   // endpoint de parede capturado pelo snap magnético de parede
-  _bodySnapPt: null,   // ponto no corpo da parede (T-junction): {pt, wallId, distA, distB, wall}
-  _trackSnap:  null,   // tracking snap ativo (alinhamento H/V com endpoint existente)
+  _bodySnapPt:     null,  // ponto no corpo da parede (T-junction): {pt, wallId, distA, distB, wall}
+  _anchorBodySnap: null,  // body snap do ponto de início da cadeia atual — amarrações persistentes
+  _destBodySnap:   null,  // body snap do ponto destino durante o aim (visual only, não muda ângulo)
+  _trackSnap:      null,  // tracking snap ativo (alinhamento H/V com endpoint existente)
   _rubber:     null,   // borracha: { x1,y1,x2,y2 } em world coords
   _rubberIds:  [],     // elementos selecionados pela borracha [{type,id}]
 
@@ -4193,6 +4195,49 @@ const CanvasEditor = {
       ctx.fillText(label, (x1 + x2) / 2, (y1 + y2) / 2 - 12 / this.zoom);
     }
 
+    // Amarrações persistentes do ponto de início quando é body snap
+    if (this._anchorBodySnap && this.currentTool === 'wall') {
+      const b = this._anchorBodySnap;
+      const { wall, distA, distB } = b;
+      const wallLen = dist(wall.x1, wall.y1, wall.x2, wall.y2);
+      const ux = (wall.x2 - wall.x1) / wallLen;
+      const uy = (wall.y2 - wall.y1) / wallLen;
+      const perpX = -uy, perpY = ux;
+      const off = 32 / this.zoom;
+      const fs  = 13 / this.zoom;
+      const pad = 4  / this.zoom;
+
+      ctx.save();
+      ctx.font = `700 ${fs}px Inter,sans-serif`;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+
+      // Label distA (lado do endpoint 1)
+      const lA = fmtMm(distA);
+      const mxA = x1 - ux * distA / 2, myA = y1 - uy * distA / 2;
+      const twA = ctx.measureText(lA).width;
+      ctx.fillStyle = 'rgba(90,154,112,0.9)';
+      ctx.beginPath();
+      ctx.roundRect(mxA - twA/2 - pad, myA + perpY*off - fs/2 - pad, twA + pad*2, fs + pad*2, 3/this.zoom);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(lA, mxA, myA + perpY * off);
+
+      // Label distB (lado do endpoint 2)
+      const lB = fmtMm(distB);
+      const mxB = x1 + ux * distB / 2, myB = y1 + uy * distB / 2;
+      const twB = ctx.measureText(lB).width;
+      ctx.fillStyle = 'rgba(90,154,112,0.9)';
+      ctx.beginPath();
+      ctx.roundRect(mxB - twB/2 - pad, myB + perpY*off - fs/2 - pad, twB + pad*2, fs + pad*2, 3/this.zoom);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillText(lB, mxB, myB + perpY * off);
+
+      ctx.textBaseline = 'alphabetic';
+      ctx.restore();
+    }
+
     // Start dot — tamanho fixo na tela (~13px), visível mas discreto
     if (this.currentTool !== 'environment') {
       const r = 13 / this.zoom;
@@ -4312,14 +4357,14 @@ const CanvasEditor = {
         const snapped  = this._snapToWallEndpoint(raw);
         const bodySnap = snapped ? null : this._snapToWallBody(raw);
         this._wallSnapPt = null;
+        this._bodySnapPt = null;
         if (bodySnap) {
-          // Inicia no corpo da parede: mostra amarrações e ancora
-          this._bodySnapPt = null;
+          this._anchorBodySnap = bodySnap; // persiste amarrações durante o aim
           this._wallSetAnchor(bodySnap.pt);
           const lA = fmtMm(bodySnap.distA), lB = fmtMm(bodySnap.distB);
-          Toast.show(`Amarrado: ${lA} de um lado · ${lB} do outro`, 'success');
+          Toast.show(`Amarrado: ${lA} · ${lB}`, 'success');
         } else {
-          this._bodySnapPt = null;
+          this._anchorBodySnap = null;
           this._wallSetAnchor(snapped || world);
         }
       } else {
@@ -4382,8 +4427,9 @@ const CanvasEditor = {
 
     if (this.currentTool === 'wall' && this._aiming) {
       this._wallAim(raw);
-      this._bodySnapPt = null;
-      this._archSnapPt = null;
+      this._bodySnapPt  = null;
+      this._archSnapPt  = null;
+      this._destBodySnap = null;
       // Endpoint snap só se NÃO está fechando (fechamento tem prioridade absoluta)
       if (!this._aimClosing) {
         this._wallSnapPt = this._snapToWallEndpoint(raw);
@@ -4394,6 +4440,14 @@ const CanvasEditor = {
           this._snapBadge = null;
           this._snapIs90  = false;
           this._showHint('Solte para conectar neste ponto');
+        } else {
+          // Body snap destino: visual apenas (6px), não muda ângulo
+          const bs = this._snapToWallBody(raw, 6);
+          if (bs) {
+            this._destBodySnap = bs;
+            this._bodySnapPt   = bs; // exibe o losango verde
+            this._showHint('Solte para encaixar na parede');
+          }
         }
       }
       this._draw();
@@ -4662,7 +4716,11 @@ const CanvasEditor = {
     if (!this.drawStart || this._aimAngle == null) { this._aiming = false; return; }
     const a          = this.drawStart;
     const closing    = !!this._aimClosing;
-    const snapTarget = this._wallSnapPt ? { x: this._wallSnapPt.x, y: this._wallSnapPt.y } : null;
+    const snapTarget = this._wallSnapPt
+      ? { x: this._wallSnapPt.x,      y: this._wallSnapPt.y }
+      : this._destBodySnap
+      ? { x: this._destBodySnap.pt.x, y: this._destBodySnap.pt.y }
+      : null;
     const dirX       = Math.cos(this._aimAngle);
     const dirY       = Math.sin(this._aimAngle);
 
@@ -4759,10 +4817,12 @@ const CanvasEditor = {
     this._aimClosing = false;
     this._aimAngle   = null;
     this._snapBadge  = null;
-    this._snapIs90   = false;
-    this._wallSnapPt = null;
-    this._bodySnapPt = null;
-    this._trackSnap  = null;
+    this._snapIs90       = false;
+    this._wallSnapPt     = null;
+    this._bodySnapPt     = null;
+    this._anchorBodySnap = null;
+    this._destBodySnap   = null;
+    this._trackSnap      = null;
     this._updateCancelBtn();
     this._updateWallActions();
     this._updateUndoRedo();
@@ -6857,8 +6917,8 @@ const CanvasEditor = {
       // Parede: arrastar 1 dedo mira a direção (trava em 90°/45°)
       if (this.currentTool === 'wall' && this._aiming) {
         this._wallAim(raw);
-        this._bodySnapPt = null;
-        // Endpoint snap só se NÃO está fechando (fechamento tem prioridade absoluta)
+        this._bodySnapPt   = null;
+        this._destBodySnap = null;
         if (!this._aimClosing) {
           this._wallSnapPt = this._snapToWallEndpoint(raw);
           if (this._wallSnapPt) {
@@ -6868,6 +6928,13 @@ const CanvasEditor = {
             this._snapBadge = null;
             this._snapIs90  = false;
             this._showHint('Solte para conectar neste ponto');
+          } else {
+            const bs = this._snapToWallBody(raw, 6);
+            if (bs) {
+              this._destBodySnap = bs;
+              this._bodySnapPt   = bs;
+              this._showHint('Solte para encaixar na parede');
+            }
           }
         }
         this._draw();
@@ -6995,10 +7062,12 @@ const CanvasEditor = {
             this._wallSnapPt = null;
             this._bodySnapPt = null;
             if (snapBody) {
+              this._anchorBodySnap = snapBody;
               this._wallSetAnchor(snapBody.pt);
               const lA = fmtMm(snapBody.distA), lB = fmtMm(snapBody.distB);
-              Toast.show(`Amarrado: ${lA} de um lado · ${lB} do outro`, 'success');
+              Toast.show(`Amarrado: ${lA} · ${lB}`, 'success');
             } else {
+              this._anchorBodySnap = null;
               this._wallSetAnchor(snapEP || world);
             }
           } else {
