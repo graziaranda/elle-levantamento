@@ -2446,6 +2446,7 @@ const CanvasEditor = {
   mouseWorld:  { x: 0, y: 0 },
 
   selected: null,  // { type: 'wall'|'dim'|'inst'|'note', id }
+  _wallDrag: null, // { wallId, mode:'body'|'end1'|'end2', startX, startY, origX1, origY1, origX2, origY2 }
 
   isPanning:    false,
   panStart:     null,
@@ -3297,6 +3298,7 @@ const CanvasEditor = {
     if (this._rubber)         this._layer('borracha',       () => this._drawRubber(ctx));
     if (this.drawStart) this._layer('preview', () => this._drawPreview(ctx));
     if (this.currentTool === 'environment') this._layer('preview-amb', () => this._drawEnvPreview(ctx));
+    if (this._wallDrag)  this._layer('drag-cotas', () => this._drawWallDragCotas(ctx));
 
     ctx.restore();
 
@@ -3643,6 +3645,30 @@ const CanvasEditor = {
       ctx.fillStyle = sel ? '#C9A84C' : '#FFFFFF';
       ctx.fillText(label, 0, yOff);
       ctx.restore();
+    }
+
+    // Handles de endpoint para parede selecionada (arrastáveis)
+    if (this.selected?.type === 'wall') {
+      const sw = walls.find(w => w.id === this.selected.id);
+      if (sw) {
+        const r = Math.max(10 / this.zoom, 60); // 60mm mínimo, legível em qualquer zoom
+        for (const [px, py] of [[sw.x1, sw.y1], [sw.x2, sw.y2]]) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(201,168,76,0.25)';
+          ctx.fill();
+          ctx.strokeStyle = '#C9A84C';
+          ctx.lineWidth = Math.max(2 / this.zoom, 12);
+          ctx.stroke();
+          // Ponto central branco
+          ctx.beginPath();
+          ctx.arc(px, py, r * 0.3, 0, Math.PI * 2);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          ctx.restore();
+        }
+      }
     }
   },
 
@@ -4412,6 +4438,20 @@ const CanvasEditor = {
       case 'select':      this._clickSelect(raw);    break;
       case 'environment': this._clickEnvironment(world); break;
     }
+
+    // Inicia drag de parede se acabou de selecionar uma
+    if (this.currentTool === 'select' && this.selected?.type === 'wall') {
+      const sw = this.project.canvas.walls.find(w => w.id === this.selected.id);
+      if (sw) {
+        const EP = 20 / this.zoom;
+        let mode = 'body';
+        if (dist(raw.x, raw.y, sw.x1, sw.y1) < EP) mode = 'end1';
+        else if (dist(raw.x, raw.y, sw.x2, sw.y2) < EP) mode = 'end2';
+        this._wallDrag = { wallId: sw.id, mode, startX: raw.x, startY: raw.y,
+                           origX1: sw.x1, origY1: sw.y1, origX2: sw.x2, origY2: sw.y2,
+                           _histSaved: false };
+      }
+    }
   },
 
   _onMouseMove(e) {
@@ -4421,6 +4461,33 @@ const CanvasEditor = {
     if (this.isPanning) {
       this.panX = this.panStart.panX + (e.clientX - this.panStart.mx);
       this.panY = this.panStart.panY + (e.clientY - this.panStart.my);
+      this._draw();
+      return;
+    }
+
+    // Drag de parede: move corpo ou endpoint em tempo real
+    if (this._wallDrag) {
+      const d  = this._wallDrag;
+      const sw = this.project.canvas.walls.find(w => w.id === d.wallId);
+      if (sw) {
+        if (!d._histSaved) {
+          // Restaura posição original antes de salvar snapshot pré-drag
+          sw.x1 = d.origX1; sw.y1 = d.origY1; sw.x2 = d.origX2; sw.y2 = d.origY2;
+          this._pushHistory();
+          d._histSaved = true;
+        }
+        if (d.mode === 'body') {
+          const ddx = raw.x - d.startX, ddy = raw.y - d.startY;
+          sw.x1 = d.origX1 + ddx; sw.y1 = d.origY1 + ddy;
+          sw.x2 = d.origX2 + ddx; sw.y2 = d.origY2 + ddy;
+        } else if (d.mode === 'end1') {
+          const sn = this._snapWorld(raw, e.shiftKey);
+          sw.x1 = sn.x; sw.y1 = sn.y;
+        } else {
+          const sn = this._snapWorld(raw, e.shiftKey);
+          sw.x2 = sn.x; sw.y2 = sn.y;
+        }
+      }
       this._draw();
       return;
     }
@@ -4491,6 +4558,14 @@ const CanvasEditor = {
   },
 
   _onMouseUp(e) {
+    // Commit drag de parede
+    if (this._wallDrag) {
+      this._wallDrag = null;
+      this._scheduleSave();
+      this._draw();
+      return;
+    }
+
     if (this.isPanning) {
       this.isPanning = false;
       this.canvas.style.cursor = this.currentTool === 'select' ? 'default' : 'crosshair';
@@ -4635,9 +4710,9 @@ const CanvasEditor = {
         if (Math.abs(norm(ang - target)) <= d2r(8)) return target;
       }
     }
-    // Ângulos absolutos — tolerância 8° (antes era 14°, causava "90° travado")
-    for (const t of [0, 90, 180, -90, -180]) if (Math.abs(norm(ang - d2r(t))) <= d2r(8)) return d2r(t);
-    for (const t of [45, 135, -45, -135])    if (Math.abs(norm(ang - d2r(t))) <= d2r(6)) return d2r(t);
+    // Ângulos absolutos — tolerância 11° para H/V (trava mais confiável no tablet)
+    for (const t of [0, 90, 180, -90, -180]) if (Math.abs(norm(ang - d2r(t))) <= d2r(11)) return d2r(t);
+    for (const t of [45, 135, -45, -135])    if (Math.abs(norm(ang - d2r(t))) <= d2r(7))  return d2r(t);
     return ang; // ângulo livre
   },
 
@@ -6983,6 +7058,24 @@ const CanvasEditor = {
         return;
       }
 
+      // Selecionar + parede já selecionada: detecta drag de endpoint ou corpo
+      if (this.currentTool === 'select' && this.selected?.type === 'wall') {
+        const sw = this.project.canvas.walls.find(w => w.id === this.selected.id);
+        if (sw) {
+          const EP = 35 / this.zoom; // raio maior para dedo
+          let mode = null;
+          if (dist(raw.x, raw.y, sw.x1, sw.y1) < EP) mode = 'end1';
+          else if (dist(raw.x, raw.y, sw.x2, sw.y2) < EP) mode = 'end2';
+          else if (this._pointNearSegment(raw, { x: sw.x1, y: sw.y1 }, { x: sw.x2, y: sw.y2 }, EP)) mode = 'body';
+          if (mode) {
+            this._wallDrag = { wallId: sw.id, mode, startX: raw.x, startY: raw.y,
+                               origX1: sw.x1, origY1: sw.y1, origX2: sw.x2, origY2: sw.y2,
+                               _histSaved: false };
+            return; // não passa para pan/select
+          }
+        }
+      }
+
       // Parede: se já há ponto inicial, este dedo começa a mirar a direção
       if (this.currentTool === 'wall' && this.drawStart) {
         this._aiming = true;
@@ -7010,6 +7103,30 @@ const CanvasEditor = {
     if (e.touches.length === 1 && this._touches.length === 1) {
       const rect = this.canvas.getBoundingClientRect();
       const raw  = this.toWorld(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+
+      // Drag de parede (select): move corpo ou endpoint
+      if (this._wallDrag) {
+        const d  = this._wallDrag;
+        const sw = this.project.canvas.walls.find(w => w.id === d.wallId);
+        if (sw) {
+          if (!d._histSaved) {
+            sw.x1 = d.origX1; sw.y1 = d.origY1; sw.x2 = d.origX2; sw.y2 = d.origY2;
+            this._pushHistory(); d._histSaved = true;
+          }
+          if (d.mode === 'body') {
+            const ddx = raw.x - d.startX, ddy = raw.y - d.startY;
+            sw.x1 = d.origX1 + ddx; sw.y1 = d.origY1 + ddy;
+            sw.x2 = d.origX2 + ddx; sw.y2 = d.origY2 + ddy;
+          } else if (d.mode === 'end1') {
+            sw.x1 = raw.x; sw.y1 = raw.y;
+          } else {
+            sw.x2 = raw.x; sw.y2 = raw.y;
+          }
+        }
+        this._touches = Array.from(e.touches);
+        this._draw();
+        return;
+      }
 
       // Parede: arrastar 1 dedo mira a direção (trava em 90°/45°)
       if (this.currentTool === 'wall' && this._aiming) {
@@ -7123,6 +7240,16 @@ const CanvasEditor = {
 
   _onTouchEnd(e) {
     e.preventDefault();
+
+    // Commit drag de parede
+    if (this._wallDrag) {
+      this._wallDrag = null;
+      this._scheduleSave();
+      this._touches       = Array.from(e.touches);
+      this._touchStartPos = null;
+      this._draw();
+      return;
+    }
 
     // 1 dedo levantado
     if (e.changedTouches.length === 1 && e.touches.length === 0) {
@@ -7527,6 +7654,92 @@ const CanvasEditor = {
   _pointNearSegment(p, a, b, r) {
     const { t, d } = this._projectPointOnSegment(p, a, b);
     return t >= 0 && t <= 1 && d < r;
+  },
+
+  // Overlay de cotas em tempo real durante drag de parede
+  _drawWallDragCotas(ctx) {
+    const d = this._wallDrag;
+    if (!d) return;
+    const w = this.project.canvas.walls.find(w => w.id === d.wallId);
+    if (!w) return;
+
+    const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const mx  = (w.x1 + w.x2) / 2;
+    const my  = (w.y1 + w.y2) / 2;
+
+    // --- Label grande do comprimento sobre a parede ---
+    const fs  = Math.max(18 / this.zoom, 120); // mínimo 120mm para ser sempre legível
+    ctx.save();
+    ctx.font      = `bold ${fs}px Inter,sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = fmtMm(len);
+    const tw    = ctx.measureText(label).width;
+    const pad   = fs * 0.4;
+    const yOff  = -(Math.max(w.thickness || 150, 150) / 2 + fs * 0.9);
+    // Pill dourada
+    ctx.fillStyle = 'rgba(201,168,76,0.97)';
+    const rx = mx - tw / 2 - pad, ry = my + yOff - fs / 2 - pad * 0.5;
+    ctx.beginPath();
+    ctx.roundRect(rx, ry, tw + pad * 2, fs + pad, fs * 0.3);
+    ctx.fill();
+    ctx.fillStyle = '#1a1209';
+    ctx.fillText(label, mx, my + yOff);
+    ctx.restore();
+
+    // --- Cotas horizontais e verticais (modo body drag) ---
+    if (d.mode === 'body') {
+      const absDx = Math.abs(dx), absDy = Math.abs(dy);
+      const tickLen = Math.max(100 / this.zoom, 60);
+      const dashLen = Math.max(3 / this.zoom, 20);
+      ctx.save();
+      ctx.setLineDash([dashLen, dashLen]);
+      ctx.strokeStyle = 'rgba(201,168,76,0.7)';
+      ctx.lineWidth   = Math.max(1.5 / this.zoom, 10);
+
+      // Linha horizontal (projeção X)
+      if (absDx > 50) {
+        const hy = Math.max(w.y1, w.y2) + tickLen * 2;
+        ctx.beginPath();
+        ctx.moveTo(w.x1, hy); ctx.lineTo(w.x2, hy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Ticks
+        ctx.beginPath();
+        ctx.moveTo(w.x1, hy - tickLen); ctx.lineTo(w.x1, hy + tickLen);
+        ctx.moveTo(w.x2, hy - tickLen); ctx.lineTo(w.x2, hy + tickLen);
+        ctx.stroke();
+        // Label
+        const fsS = Math.max(12 / this.zoom, 80);
+        ctx.font = `500 ${fsS}px Inter,sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(201,168,76,0.9)';
+        ctx.fillText(fmtMm(absDx), (w.x1 + w.x2) / 2, hy + tickLen * 0.5);
+      }
+
+      // Linha vertical (projeção Y)
+      if (absDy > 50) {
+        const vx = Math.max(w.x1, w.x2) + tickLen * 2;
+        ctx.setLineDash([dashLen, dashLen]);
+        ctx.strokeStyle = 'rgba(201,168,76,0.7)';
+        ctx.beginPath();
+        ctx.moveTo(vx, w.y1); ctx.lineTo(vx, w.y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(vx - tickLen, w.y1); ctx.lineTo(vx + tickLen, w.y1);
+        ctx.moveTo(vx - tickLen, w.y2); ctx.lineTo(vx + tickLen, w.y2);
+        ctx.stroke();
+        // Label
+        const fsS = Math.max(12 / this.zoom, 80);
+        ctx.font = `500 ${fsS}px Inter,sans-serif`;
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(201,168,76,0.9)';
+        ctx.fillText(fmtMm(absDy), vx + tickLen * 0.5, (w.y1 + w.y2) / 2);
+      }
+      ctx.restore();
+    }
   },
 
   _projectPointOnSegment(p, a, b) {
