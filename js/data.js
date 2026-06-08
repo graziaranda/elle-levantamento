@@ -434,8 +434,9 @@ function createProject(name, client, address) {
 
 const ImageStore = {
   _DB_NAME:    'elle_levantamento_images',
-  _DB_VERSION: 1,
+  _DB_VERSION: 2,
   _STORE:      'images',
+  _PROJ_STORE: 'projects',
   _db:         null,
 
   _open() {
@@ -443,7 +444,13 @@ const ImageStore = {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(this._DB_NAME, this._DB_VERSION);
       req.onupgradeneeded = e => {
-        e.target.result.createObjectStore(this._STORE, { keyPath: 'id' });
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(this._STORE)) {
+          db.createObjectStore(this._STORE, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(this._PROJ_STORE)) {
+          db.createObjectStore(this._PROJ_STORE, { keyPath: 'id' });
+        }
       };
       req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
       req.onerror   = e => reject(e.target.error);
@@ -486,6 +493,60 @@ const ImageStore = {
         tx.onerror    = e => reject(e.target.error);
       });
     } catch { /* ignore */ }
+  },
+
+  // ── Project store (dados completos do projeto) ──────────────
+
+  async putProject(project) {
+    const db = await this._open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this._PROJ_STORE, 'readwrite');
+      tx.objectStore(this._PROJ_STORE).put(project);
+      tx.oncomplete = resolve;
+      tx.onerror    = e => reject(e.target.error);
+    });
+  },
+
+  async getProject(id) {
+    if (!id) return null;
+    try {
+      const db = await this._open();
+      return new Promise((resolve, reject) => {
+        const req = db.transaction(this._PROJ_STORE, 'readonly')
+                      .objectStore(this._PROJ_STORE).get(id);
+        req.onsuccess = e => resolve(e.target.result || null);
+        req.onerror   = e => reject(e.target.error);
+      });
+    } catch {
+      return null;
+    }
+  },
+
+  async delProject(id) {
+    if (!id) return;
+    try {
+      const db = await this._open();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(this._PROJ_STORE, 'readwrite');
+        tx.objectStore(this._PROJ_STORE).delete(id);
+        tx.oncomplete = resolve;
+        tx.onerror    = e => reject(e.target.error);
+      });
+    } catch { /* ignore */ }
+  },
+
+  async getAllProjects() {
+    try {
+      const db = await this._open();
+      return new Promise((resolve, reject) => {
+        const req = db.transaction(this._PROJ_STORE, 'readonly')
+                      .objectStore(this._PROJ_STORE).getAll();
+        req.onsuccess = e => resolve(e.target.result || []);
+        req.onerror   = e => reject(e.target.error);
+      });
+    } catch {
+      return [];
+    }
   },
 
   // Recebe o projeto EM MEMÓRIA (com base64 intacto).
@@ -536,15 +597,28 @@ const ImageStore = {
   // Remove imagens do IndexedDB que não são mais referenciadas por nenhum projeto.
   async gc() {
     try {
-      const all      = Storage.getAll();
       const usedRefs = new Set();
-      for (const p of Object.values(all)) {
+
+      // Coleta refs dos projetos no IDB (fonte primária)
+      const idbProjects = await this.getAllProjects();
+      for (const p of idbProjects) {
         for (const pin of (p.canvas?.photoPins || [])) {
           if (pin._photoRef) usedRefs.add(pin._photoRef);
         }
         const bgRef = p.canvas?.backgroundImage?._dataRef;
         if (bgRef) usedRefs.add(bgRef);
       }
+
+      // Também varre localStorage (projetos legados ainda com canvas completo)
+      const legacy = Storage.getAll();
+      for (const p of Object.values(legacy)) {
+        for (const pin of (p.canvas?.photoPins || [])) {
+          if (pin._photoRef) usedRefs.add(pin._photoRef);
+        }
+        const bgRef = p.canvas?.backgroundImage?._dataRef;
+        if (bgRef) usedRefs.add(bgRef);
+      }
+
       const db = await this._open();
       const keys = await new Promise((res, rej) => {
         const req = db.transaction(this._STORE, 'readonly').objectStore(this._STORE).getAllKeys();
@@ -561,8 +635,34 @@ const ImageStore = {
 };
 
 // ── Storage API ───────────────────────────────
+//
+// Arquitetura de armazenamento (v2):
+//   IndexedDB (elle_levantamento_images, store "projects"):
+//     → projeto COMPLETO sem base64 (canvas, paredes, aberturas, etc.)
+//     → sem limite de 5 MB, persistente, nunca limpo pelo browser sozinho
+//   IndexedDB (store "images"):
+//     → fotos e imagem de fundo (base64) — já existia
+//   localStorage (elle_levantamento_v1):
+//     → índice LEVE de cada projeto (id, nome, data, contadores)
+//     → apenas para listagem rápida no dashboard e fallback offline
+//
+// Fluxo de ESCRITA (Storage.save — async):
+//   1. Extrai imagens → IDB images   (já existia)
+//   2. Escreve projeto leve → IDB projects  ← NOVO
+//   3. Escreve índice mínimo → localStorage (nome, data, contadores)
+//   Fallback: se IDB projects falhar, localStorage recebe projeto completo (como antes)
+//
+// Fluxo de LEITURA:
+//   getList()  → síncrono, lê índice do localStorage (dashboard rápido)
+//   get(id)    → assíncrono, lê do IDB projects; fallback localStorage
+//   hydrateAsync(project) → já existia (imagens)
+//
+// Migração transparente:
+//   Projetos antigos (canvas no localStorage) são servidos via fallback até o
+//   próximo save(), que os migra para IDB automaticamente.
 
 const Storage = {
+  // Lê o mapa bruto do localStorage (índice leve + projetos legados completos).
   getAll() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -572,27 +672,47 @@ const Storage = {
     }
   },
 
+  // Lista leve para o dashboard — síncrona, lê apenas o índice do localStorage.
+  // Compatível com entradas antigas (canvas completo) e novas (só índice).
   getList() {
     return Object.values(this.getAll())
-      .map(normalizeProject)
+      .map(p => ({
+        id:        p.id        || '',
+        name:      p.name      || '',
+        client:    p.client    || '',
+        address:   p.address   || '',
+        createdAt: p.createdAt || new Date().toISOString(),
+        updatedAt: p.updatedAt || new Date().toISOString(),
+        thumbnail: p.thumbnail || null,
+        packs:     Array.isArray(p.packs) ? p.packs : [],
+        // Contadores para o card — suporta formato antigo (canvas) e novo (_count)
+        _wallCount: p._wallCount ?? (p.canvas?.walls?.length         || 0),
+        _instCount: p._instCount ?? (p.canvas?.installations?.length || 0),
+        _envCount:  p._envCount  ?? (p.canvas?.environments?.length  || 0),
+      }))
       .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   },
 
-  get(id) {
+  // Lê projeto COMPLETO — assíncrono.
+  // Tenta IDB primeiro; cai para localStorage (projetos legados ou IDB indisponível).
+  async get(id) {
+    try {
+      const proj = await ImageStore.getProject(id);
+      if (proj) return normalizeProject(proj);
+    } catch { /* fall through */ }
+
+    // Fallback: localStorage (projeto legado com canvas ou ausente)
     const p = this.getAll()[id];
     return p ? normalizeProject(p) : null;
   },
 
   // Recarrega imagens pesadas do IndexedDB para o projeto (assíncrono).
-  // Chamar após get() quando o canvas precisar exibir fotos.
-  // Retorna Promise<project> com photoData e backgroundImage.data preenchidos.
   hydrateAsync(project) {
     return ImageStore.loadImages(project);
   },
 
   // Copia o projeto sem os binários pesados (base64).
-  // Adiciona refs (_photoRef / _dataRef) para o IndexedDB.
-  // Operação SÍNCRONA — não depende de I/O.
+  // Adiciona refs (_photoRef / _dataRef) para o IndexedDB de imagens.
   _stripImages(project) {
     const p = JSON.parse(JSON.stringify(project));
     const c = p.canvas;
@@ -603,7 +723,6 @@ const Storage = {
         pin._photoRef = `img_${pin.id}`;
         pin.photoData = null;
       }
-      // Retrocompat: se já estava em base64 curta (<200 chars = ícone SVG ou similar), mantém
     }
 
     const bg = c.backgroundImage;
@@ -615,40 +734,90 @@ const Storage = {
     return p;
   },
 
+  // Entrada mínima para o índice do localStorage (sem canvas).
+  _indexEntry(p) {
+    return {
+      id:         p.id,
+      schemaVersion: p.schemaVersion,
+      name:       p.name       || '',
+      client:     p.client     || '',
+      address:    p.address    || '',
+      createdAt:  p.createdAt  || new Date().toISOString(),
+      updatedAt:  p.updatedAt,
+      thumbnail:  p.thumbnail  || null,
+      packs:      Array.isArray(p.packs) ? p.packs : [],
+      _wallCount: (p.canvas?.walls         || []).length,
+      _instCount: (p.canvas?.installations || []).length,
+      _envCount:  (p.canvas?.environments  || []).length,
+    };
+  },
+
   async save(project) {
     project.updatedAt = new Date().toISOString();
 
-    // 1. Persistir imagens no IndexedDB PRIMEIRO e AGUARDAR confirmação.
-    //    Só removemos o base64 do localStorage depois que o IndexedDB confirmar.
-    //    Se o IndexedDB falhar, o base64 permanece inline (fallback seguro —
-    //    o projeto fica pesado, mas nenhuma foto é perdida em silêncio).
+    // 1. Salvar imagens no IDB images e remover base64 inline
     let liteProject;
     try {
       await ImageStore.extractAndSave(project);
-      liteProject = this._stripImages(project);   // clona sem base64
-    } catch (idbErr) {
-      console.warn('ImageStore: gravação no IndexedDB falhou, mantendo base64 inline:', idbErr);
-      liteProject = JSON.parse(JSON.stringify(project)); // clone completo, com base64
+      liteProject = this._stripImages(project);
+    } catch (imgErr) {
+      console.warn('[Elle] ImageStore imagens falhou, mantendo base64 inline:', imgErr);
+      liteProject = JSON.parse(JSON.stringify(project));
     }
     liteProject.updatedAt = project.updatedAt;
 
-    // 2. Salvar projeto no localStorage (leve se IndexedDB ok; pesado se fallback)
+    // 2. Salvar projeto completo no IDB projects store
+    let idbOk = false;
+    try {
+      await ImageStore.putProject(liteProject);
+      idbOk = true;
+    } catch (projErr) {
+      console.warn('[Elle] IDB projects falhou, localStorage recebe projeto completo:', projErr);
+    }
+
+    // 3. Atualizar localStorage com índice mínimo (ou projeto completo como fallback)
+    const lsEntry = idbOk ? this._indexEntry(liteProject) : liteProject;
     const all = this.getAll();
-    all[liteProject.id] = liteProject;
+    all[liteProject.id] = lsEntry;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
     } catch (e) {
-      console.warn('Storage quota exceeded:', e);
-      return { error: 'quota', message: 'Espaço insuficiente. Exclua fotos antigas antes de continuar.' };
+      if (idbOk) {
+        // IDB tem os dados — índice não cabe no localStorage (raro). Log e segue.
+        console.warn('[Elle] localStorage cheio mesmo para índice:', e);
+      } else {
+        // Fallback falhou: tanto IDB quanto localStorage cheios
+        console.warn('[Elle] Storage quota exceeded:', e);
+        return { error: 'quota', message: 'Espaço insuficiente. Exclua fotos antigas antes de continuar.' };
+      }
     }
 
-    return project;  // devolve o projeto ORIGINAL (com base64 em memória)
+    return project; // devolve o original (com base64 em memória)
   },
 
   delete(id) {
     const all = this.getAll();
     delete all[id];
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    // Limpeza do IDB em background (não bloqueia UI)
+    ImageStore.delProject(id).catch(() => {});
+  },
+
+  // Exporta projeto como arquivo .elle (JSON completo com imagens).
+  async exportElle(id) {
+    const project = await this.get(id);
+    if (!project) return;
+    await this.hydrateAsync(project); // recarrega fotos do IDB para o objeto
+    const json = JSON.stringify(project, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${(project.name || 'levantamento').replace(/[^\w\s\-]/g, '').trim() || 'levantamento'}.elle`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
 
   storageUsedKb() {
@@ -660,20 +829,12 @@ const Storage = {
     }
   },
 
-  // Quota restante estimada em KB (heurística — localStorage máx ~5MB)
   storageRemainingKb() {
     const used = this.storageUsedKb();
     return Math.max(0, 5120 - used);
   },
 
-  // PERSISTÊNCIA DO ARMAZENAMENTO (Chrome/Android e iOS)
-  // Solicita ao navegador que não despeje o IndexedDB sob pressão de espaço.
-  // No Chrome (Android): concede por engajamento/uso — muito provável em app
-  //   instalado via "Adicionar à tela inicial". Sem essa chamada, o armazenamento
-  //   é "best-effort" e pode ser removido pelo sistema em condições extremas.
-  // No Safari (iOS): mais restritivo, mas a chamada é harmless — o user-agent
-  //   pode conceder se o site estiver nos favoritos ou instalado como PWA.
-  // Seguro chamar mesmo em browsers sem suporte: a checagem de typeof protege.
+  // Solicita ao navegador que marque o IndexedDB como persistente.
   async requestPersistentStorage() {
     if (typeof navigator === 'undefined') return false;
     const sm = navigator.storage;

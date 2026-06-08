@@ -76,42 +76,41 @@ const CanvasEditor = {
   // ── Open ──────────────────────────────────
 
   open(projectId) {
-    const p = Storage.get(projectId);
-    if (!p) { App.navigate('/'); return; }
+    // Storage.get() é assíncrono (lê do IndexedDB com fallback ao localStorage).
+    // Todo o setup do editor ocorre dentro do .then() para garantir que os dados
+    // do projeto estejam disponíveis antes de renderizar qualquer coisa.
+    Storage.get(projectId).then(p => {
+      if (!p) { App.navigate('/'); return; }
 
-    this.project = p;
-    this.zoom    = p.canvas.zoom  || 0.15;
-    this.panX    = p.canvas.panX  || 200;
-    this.panY    = p.canvas.panY  || 200;
-    // Snapshot inicial vazio — primeiro undo volta ao estado antes de qualquer ação
-    this.history    = [JSON.stringify(p.canvas)];
-    this.historyIdx = 0;
-    this.drawStart  = null;
-    this.selected   = null;
-    this.envPoints  = [];
-    this._scaleTool = null;
-    this._bgImg     = null;
+      this.project = p;
+      this.zoom    = p.canvas.zoom  || 0.15;
+      this.panX    = p.canvas.panX  || 200;
+      this.panY    = p.canvas.panY  || 200;
+      this.history    = [JSON.stringify(p.canvas)];
+      this.historyIdx = 0;
+      this.drawStart  = null;
+      this.selected   = null;
+      this.envPoints  = [];
+      this._scaleTool = null;
+      this._bgImg     = null;
 
-    this._renderShell();
-    this._initCanvas();
-    this._initKeyboard();
-    this._startAutoSave();
-    this._initVisibility();
-    // Ferramenta inicial — DEPOIS de _initCanvas (precisa de this.canvas).
-    this._setTool('wall');
-    this._updateUndoRedo();
+      this._renderShell();
+      this._initCanvas();
+      this._initKeyboard();
+      this._startAutoSave();
+      this._initVisibility();
+      this._setTool('wall');
+      this._updateUndoRedo();
 
-    // Show calibrate button if project already has a background image
-    if (this.project.canvas.backgroundImage) {
-      const btn = document.getElementById('btn-calib');
-      if (btn) btn.style.display = '';
-    }
+      if (this.project.canvas.backgroundImage) {
+        const btn = document.getElementById('btn-calib');
+        if (btn) btn.style.display = '';
+      }
 
-    // Iniciar hidratação das imagens do IndexedDB em background.
-    // _hydratePromise é aguardado pelo export de PDF antes de montar o relatório.
-    this._hydratePromise = Storage.hydrateAsync(this.project)
-      .then(() => this._draw())
-      .catch(err => console.warn('[Elle] hydrateAsync falhou:', err));
+      this._hydratePromise = Storage.hydrateAsync(this.project)
+        .then(() => this._draw())
+        .catch(err => console.warn('[Elle] hydrateAsync falhou:', err));
+    });
   },
 
   // ── Shell HTML ────────────────────────────

@@ -61,9 +61,10 @@ const Dashboard = {
     const d = new Date(p.updatedAt);
     const dateStr = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
     const timeStr = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const walls = p.canvas?.walls?.length || 0;
-    const insts = p.canvas?.installations?.length || 0;
-    const envs  = p.canvas?.environments?.length || 0;
+    // Suporta índice novo (_wallCount) e formato antigo (canvas.walls.length)
+    const walls = p._wallCount ?? p.canvas?.walls?.length ?? 0;
+    const insts = p._instCount ?? p.canvas?.installations?.length ?? 0;
+    const envs  = p._envCount  ?? p.canvas?.environments?.length ?? 0;
 
     let stats = 'novo';
     if (walls > 0 || insts > 0 || envs > 0) {
@@ -93,6 +94,9 @@ const Dashboard = {
             <button class="btn-card-primary" data-action="open" data-id="${esc(p.id)}">Abrir</button>
             <button class="btn-card-icon" data-action="dxf" data-id="${esc(p.id)}" title="Exportar DXF">
               ${this._iconDownload()} DXF
+            </button>
+            <button class="btn-card-icon" data-action="elle" data-id="${esc(p.id)}" title="Exportar backup .elle">
+              ${this._iconDownload()} .elle
             </button>
             <button class="btn-card-icon btn-danger" data-action="delete" data-id="${esc(p.id)}" title="Excluir">
               ${this._iconTrash()}
@@ -128,6 +132,7 @@ const Dashboard = {
         const { action, id } = el.dataset;
         if (action === 'open')   App.openProject(id);
         if (action === 'dxf')    this._exportDxf(id);
+        if (action === 'elle')   this._exportElle(id);
         if (action === 'delete') this._confirmDelete(id);
       });
     });
@@ -184,14 +189,15 @@ const Dashboard = {
   // ── Delete confirm ────────────────────────
 
   _confirmDelete(id) {
-    const p = Storage.get(id);
-    if (!p) return;
+    // Usa o índice síncrono do localStorage — só precisamos do nome para o modal.
+    const idx = Storage.getAll()[id];
+    if (!idx) return;
     Modal.open(`
       <div class="modal-header">
         <h2 class="modal-title">Excluir levantamento</h2>
       </div>
       <div class="modal-body">
-        <p class="confirm-text">Excluir <strong>${esc(p.name)}</strong>?</p>
+        <p class="confirm-text">Excluir <strong>${esc(idx.name)}</strong>?</p>
         <p class="confirm-sub">Esta ação não pode ser desfeita. O projeto e todos os dados serão perdidos.</p>
       </div>
       <div class="modal-footer">
@@ -210,14 +216,27 @@ const Dashboard = {
 
   // ── DXF Export ────────────────────────────
 
-  _exportDxf(id) {
-    const p = Storage.get(id);
-    if (!p) return;
+  async _exportDxf(id) {
     try {
+      const p = await Storage.get(id);
+      if (!p) return;
       DxfWriter.download(p);
       Toast.show('DXF exportado', 'success');
     } catch (e) {
       Toast.show('Erro ao gerar DXF', 'error');
+      console.error(e);
+    }
+  },
+
+  // ── .elle Export ──────────────────────────
+
+  async _exportElle(id) {
+    try {
+      Toast.show('Preparando backup…', 'info', 2000);
+      await Storage.exportElle(id);
+      Toast.show('Backup .elle exportado', 'success');
+    } catch (e) {
+      Toast.show('Erro ao exportar .elle', 'error');
       console.error(e);
     }
   },
