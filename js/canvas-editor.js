@@ -3424,8 +3424,8 @@ const CanvasEditor = {
         </div>
         <div class="prop-row">
           <div class="prop-label">Pé-direito (m)</div>
-          <input class="prop-input" id="prop-pedireito" type="number" step="0.01"
-            value="${elem.peDireito || ''}" placeholder="Ex: 2.80"
+          <input class="prop-input" id="prop-pedireito" type="text" inputmode="decimal"
+            value="${elem.peDireito || ''}" placeholder="Ex: 2,80"
             style="-webkit-user-select:text;user-select:text;">
         </div>
         <div class="prop-row">
@@ -3444,7 +3444,7 @@ const CanvasEditor = {
       });
       document.getElementById('prop-pedireito').addEventListener('change', e => {
         const env = this.project.canvas.environments.find(v => v.id === elem.id);
-        if (env) { env.peDireito = parseFloat(e.target.value) || null; this._scheduleSave(); this._draw(); }
+        if (env) { env.peDireito = parseLocaleFloat(e.target.value) || null; this._scheduleSave(); this._draw(); }
       });
       document.getElementById('prop-envobs').addEventListener('change', e => {
         const env = this.project.canvas.environments.find(v => v.id === elem.id);
@@ -3831,8 +3831,8 @@ const CanvasEditor = {
         </div>
         <div class="form-group">
           <label class="form-label">Pé-direito (m)</label>
-          <input class="form-input" id="env-pedireito" type="number" step="0.01"
-            placeholder="Ex: 2.80" style="-webkit-user-select:text;user-select:text;">
+          <input class="form-input" id="env-pedireito" type="text" inputmode="decimal"
+            placeholder="Ex: 2,80" style="-webkit-user-select:text;user-select:text;">
         </div>
       </div>
       <div class="modal-footer">
@@ -3848,7 +3848,7 @@ const CanvasEditor = {
     document.getElementById('mc-save').addEventListener('click', () => {
       const name = (document.getElementById('env-name')?.value || '').trim();
       if (!name) return;
-      const pedireito = parseFloat(document.getElementById('env-pedireito')?.value) || null;
+      const pedireito = parseLocaleFloat(document.getElementById('env-pedireito')?.value) || null;
       this._pushHistory();
       this.project.canvas.environments.push({
         id: generateId(),
@@ -3952,7 +3952,7 @@ const CanvasEditor = {
         <p style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">
           Qual é a distância real entre os dois pontos marcados?
         </p>
-        <input class="form-input" id="calib-dist" type="number" min="1"
+        <input class="form-input" id="calib-dist" type="text" inputmode="decimal"
           placeholder="Ex: 1500 (em mm)" autofocus
           style="-webkit-user-select:text;user-select:text;">
         <p style="color:var(--text-faint);font-size:10px;margin-top:6px;">Informe em milímetros</p>
@@ -3967,7 +3967,7 @@ const CanvasEditor = {
     document.getElementById('mc').addEventListener('click', () => Modal.close());
     document.getElementById('mc-cancel').addEventListener('click', () => Modal.close());
     document.getElementById('mc-ok').addEventListener('click', () => {
-      const realMm = parseFloat(document.getElementById('calib-dist')?.value);
+      const realMm = parseLocaleFloat(document.getElementById('calib-dist')?.value);
       if (!realMm || realMm <= 0) return;
       const bg  = this.project.canvas.backgroundImage;
       if (!bg) { Modal.close(); return; }

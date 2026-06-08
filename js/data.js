@@ -905,6 +905,12 @@ function esc(str) {
   return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Aceita vírgula como separador decimal (padrão BR): "2,80" → 2.80
+function parseLocaleFloat(str) {
+  if (str == null) return NaN;
+  return parseFloat(String(str).replace(',', '.'));
+}
+
 // Formata mm para exibição: ≥1000mm → "1,250m" / <1000mm → "850mm"
 function fmtMm(mm) {
   if (mm == null) return '—';
