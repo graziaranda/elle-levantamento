@@ -1,8 +1,18 @@
-const CACHE = 'elle-levantamento-v1';
+const CACHE = 'elle-levantamento-v2';
 
 const PRECACHE = [
   '/elle-levantamento/elle-levantamento-tablet.html',
   '/elle-levantamento/',
+  '/elle-levantamento/index.html',
+  '/elle-levantamento/js/data.js',
+  '/elle-levantamento/js/canvas-editor.js',
+  '/elle-levantamento/js/dashboard.js',
+  '/elle-levantamento/js/app.js',
+  '/elle-levantamento/js/dxf-writer.js',
+  '/elle-levantamento/js/pdf-report.js',
+  '/elle-levantamento/js/photo-annotator.js',
+  '/elle-levantamento/css/app.css',
+  '/elle-levantamento/manifest.json',
 ];
 
 // Instala: pré-cacheia o app principal

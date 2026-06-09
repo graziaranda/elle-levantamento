@@ -10,7 +10,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+  <link rel="manifest" href="/elle-levantamento/manifest.json">
+  <meta name="theme-color" content="#1a1814">
   <link rel="stylesheet" href="css/app.css">
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/elle-levantamento/sw.js', { scope: '/elle-levantamento/' })
+        .then(() => console.log('[SW] registrado'))
+        .catch(e => console.warn('[SW] falhou:', e));
+    }
+  </script>
 </head>
 <body>
   <div id="app"></div>

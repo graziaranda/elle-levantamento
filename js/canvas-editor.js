@@ -3816,6 +3816,7 @@ const CanvasEditor = {
   // Usado tanto pela ferramenta Ambiente quanto pelo fechamento automático de paredes.
   _promptEnvironment(pts) {
     const areaM2 = (polygonArea(pts) / 1e6).toFixed(2);
+    const defaultName = `Ambiente ${(this.project.canvas.environments?.length || 0) + 1}`;
     Modal.open(`
       <div class="modal-header">
         <h2 class="modal-title">Fechar Ambiente</h2>
@@ -3824,9 +3825,9 @@ const CanvasEditor = {
       <div class="modal-body">
         <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">Área aproximada: <strong style="color:var(--accent);">${areaM2} m²</strong></p>
         <div class="form-group">
-          <label class="form-label">Nome do ambiente <span class="required">*</span></label>
+          <label class="form-label">Nome do ambiente</label>
           <input class="form-input" id="env-name" type="text"
-            placeholder="Ex: Consultório Principal" autofocus
+            placeholder="${defaultName}"
             style="-webkit-user-select:text;user-select:text;">
         </div>
         <div class="form-group">
@@ -3836,19 +3837,17 @@ const CanvasEditor = {
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn-ghost" id="mc-cancel">Pular</button>
+        <button class="btn-ghost" id="mc-cancel">Cancelar</button>
         <button class="btn-primary" id="mc-save">Salvar ambiente</button>
       </div>
     `);
 
-    setTimeout(() => document.getElementById('env-name')?.focus(), 80);
     const cancelFn = () => { Modal.close(); this._draw(); };
     document.getElementById('mc').addEventListener('click', cancelFn);
     document.getElementById('mc-cancel').addEventListener('click', cancelFn);
     document.getElementById('mc-save').addEventListener('click', () => {
-      const name = (document.getElementById('env-name')?.value || '').trim();
-      if (!name) return;
-      const pedireito = parseLocaleFloat(document.getElementById('env-pedireito')?.value) || null;
+      const name = (document.getElementById('env-name')?.value || '').trim() || defaultName;
+      const pedireito = parseLocaleFloatOrNull(document.getElementById('env-pedireito')?.value);
       this._pushHistory();
       this.project.canvas.environments.push({
         id: generateId(),
