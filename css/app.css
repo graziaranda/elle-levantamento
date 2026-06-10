@@ -1,31 +1,32 @@
 /* ═══════════════════════════════════════════
    Elle Levantamento — Design System
-   Dark professional architectural tool
+   Tema Claro: Papel Vegetal
+   Otimizado para tablet Android, campo, sol
    ═══════════════════════════════════════════ */
 
 /* ── Tokens ── */
 :root {
-  --bg:           #1A1814;
-  --surface:      #2C2218;
-  --surface-2:    #3D3226;
-  --surface-3:    #4A3F32;
-  --accent:       #C9A84C;
-  --accent-dim:   rgba(201, 168, 76, 0.12);
-  --accent-glow:  rgba(201, 168, 76, 0.06);
-  --text:         #F5F0E8;
-  --text-muted:   #A89880;
-  --text-faint:   #6B5D4F;
-  --border:       #3D3226;
-  --border-soft:  #2C2218;
-  --red:          #C05050;
-  --green:        #5A9A70;
-  --blue:         #5B9BD5;
+  --bg:           #F0EDE8;
+  --surface:      #E8E4DE;
+  --surface-2:    #DDD8D2;
+  --surface-3:    #D0C9C1;
+  --accent:       #1D4ED8;
+  --accent-dim:   rgba(29, 78, 216, 0.10);
+  --accent-glow:  rgba(29, 78, 216, 0.05);
+  --text:         #1C1917;
+  --text-muted:   #6B6460;
+  --text-faint:   #9B948C;
+  --border:       #C8C2BA;
+  --border-soft:  #DDD8D2;
+  --red:          #DC2626;
+  --green:        #16A34A;
+  --blue:         #0284C7;
   --radius-sm:    6px;
   --radius-md:    10px;
   --radius-lg:    14px;
-  --shadow-sm:    0 1px 3px rgba(0,0,0,0.4);
-  --shadow-md:    0 4px 16px rgba(0,0,0,0.5);
-  --shadow-lg:    0 8px 32px rgba(0,0,0,0.65);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.10);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.12);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,0.18);
   --font:         'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --transition:   0.15s ease;
 }
@@ -224,7 +225,7 @@ strong { font-weight: 600; }
   gap: 7px;
   padding: 9px 18px;
   background: var(--accent);
-  color: #1A1814;
+  color: #FFFFFF;
   font-size: 13px;
   font-weight: 600;
   border: none;
@@ -265,12 +266,12 @@ strong { font-weight: 600; }
   color: var(--accent);
   font-size: 12px;
   font-weight: 600;
-  border: 1px solid rgba(201, 168, 76, 0.18);
+  border: 1px solid rgba(29, 78, 216, 0.18);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition);
 }
-.btn-card-primary:hover { background: rgba(201, 168, 76, 0.2); }
+.btn-card-primary:hover { background: rgba(29, 78, 216, 0.16); }
 
 .btn-card-icon {
   display: inline-flex;
@@ -296,16 +297,16 @@ strong { font-weight: 600; }
 
 .btn-danger-solid {
   padding: 8px 18px;
-  background: rgba(192, 80, 80, 0.12);
-  color: #E07070;
+  background: rgba(220, 38, 38, 0.08);
+  color: #DC2626;
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid rgba(192, 80, 80, 0.3);
+  border: 1px solid rgba(220, 38, 38, 0.25);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background var(--transition);
 }
-.btn-danger-solid:hover { background: rgba(192, 80, 80, 0.22); }
+.btn-danger-solid:hover { background: rgba(220, 38, 38, 0.15); }
 
 /* ══════════════════════════════════════════
    MODAL
@@ -514,7 +515,7 @@ strong { font-weight: 600; }
 .tool-btn.active {
   color: var(--accent);
   background: var(--accent-dim);
-  border-color: rgba(201, 168, 76, 0.22);
+  border-color: rgba(29, 78, 216, 0.22);
 }
 
 .tool-sep {
@@ -601,7 +602,7 @@ strong { font-weight: 600; }
   position: absolute;
   bottom: 14px;
   left: 14px;
-  background: rgba(44, 34, 24, 0.88);
+  background: rgba(240, 237, 232, 0.92);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px 10px;
@@ -616,12 +617,12 @@ strong { font-weight: 600; }
   position: absolute;
   bottom: 14px;
   left: 120px;
-  background: rgba(44, 34, 24, 0.88);
+  background: rgba(240, 237, 232, 0.92);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 10px;
-  color: var(--text-faint);
+  color: var(--text-muted);
   pointer-events: none;
   backdrop-filter: blur(4px);
   z-index: 5;
@@ -633,12 +634,12 @@ strong { font-weight: 600; }
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(44, 34, 24, 0.92);
-  border: 1px solid var(--border);
+  background: rgba(28, 25, 23, 0.85);
+  border: 1px solid rgba(28,25,23,0.1);
   border-radius: 20px;
   padding: 5px 14px;
   font-size: 11px;
-  color: var(--text-muted);
+  color: #F5F2EE;
   pointer-events: none;
   backdrop-filter: blur(4px);
   z-index: 5;
@@ -660,7 +661,7 @@ strong { font-weight: 600; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(44, 34, 24, 0.92);
+  background: rgba(240, 237, 232, 0.94);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
@@ -674,7 +675,7 @@ strong { font-weight: 600; }
   transition: background var(--transition), border-color var(--transition);
 }
 .hud-nav-btn:hover { background: var(--surface-2); }
-.hud-nav-btn:active { background: var(--accent-dim); border-color: rgba(201, 168, 76, 0.4); }
+.hud-nav-btn:active { background: var(--accent-dim); border-color: rgba(29, 78, 216, 0.35); }
 
 /* ── Teclado numérico ── */
 .numpad { width: 280px; max-width: 86vw; }
@@ -726,7 +727,7 @@ strong { font-weight: 600; }
   -webkit-tap-highlight-color: transparent;
   transition: background var(--transition);
 }
-.np-key:active { background: var(--accent-dim); border-color: rgba(201, 168, 76, 0.4); }
+.np-key:active { background: var(--accent-dim); border-color: rgba(29, 78, 216, 0.35); }
 .np-back { color: var(--text-muted); font-size: 20px; }
 .numpad-actions {
   display: flex;
@@ -765,7 +766,7 @@ strong { font-weight: 600; }
 .op-seg button.active {
   color: var(--accent);
   background: var(--accent-dim);
-  border-color: rgba(201, 168, 76, 0.4);
+  border-color: rgba(29, 78, 216, 0.35);
 }
 
 .op-flip {
@@ -800,7 +801,7 @@ strong { font-weight: 600; }
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  background: rgba(44, 34, 24, 0.95);
+  background: rgba(240, 237, 232, 0.96);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -809,7 +810,7 @@ strong { font-weight: 600; }
   -webkit-tap-highlight-color: transparent;
 }
 .wall-act-done {
-  color: #1A1814;
+  color: #FFFFFF;
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -871,8 +872,8 @@ strong { font-weight: 600; }
   border-color: var(--surface-3);
   background: var(--surface-2);
 }
-.install-btn.electric:hover { border-color: rgba(201, 168, 76, 0.4); color: var(--accent); }
-.install-btn.hydro:hover { border-color: rgba(91, 155, 213, 0.4); color: var(--blue); }
+.install-btn.electric:hover { border-color: rgba(217,119,6,0.4); color: #D97706; }
+.install-btn.hydro:hover { border-color: rgba(2,132,199,0.4); color: var(--blue); }
 
 /* ── Section label in modal ── */
 .modal-section {
@@ -947,7 +948,7 @@ kbd {
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: #0e0c0a;
+  background: #E8E4DE;
 }
 
 #pa-canvas {
@@ -1019,7 +1020,7 @@ kbd {
   max-width: 90vw;
   background: var(--surface);
   border-left: 1px solid var(--border);
-  box-shadow: -6px 0 24px rgba(0,0,0,0.55);
+  box-shadow: -6px 0 24px rgba(0,0,0,0.12);
   display: flex;
   flex-direction: column;
   z-index: 400;                /* acima de qualquer elemento do editor */

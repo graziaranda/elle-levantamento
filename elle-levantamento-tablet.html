@@ -12,32 +12,33 @@
 <style>
 /* ═══════════════════════════════════════════
    Elle Levantamento — Design System
-   Dark professional architectural tool
+   Tema Claro: Papel Vegetal
+   Otimizado para tablet Android, campo, sol
    ═══════════════════════════════════════════ */
 
 /* ── Tokens ── */
 :root {
-  --bg:           #1A1814;
-  --surface:      #2C2218;
-  --surface-2:    #3D3226;
-  --surface-3:    #4A3F32;
-  --accent:       #C9A84C;
-  --accent-dim:   rgba(201, 168, 76, 0.12);
-  --accent-glow:  rgba(201, 168, 76, 0.06);
-  --text:         #F5F0E8;
-  --text-muted:   #A89880;
-  --text-faint:   #6B5D4F;
-  --border:       #3D3226;
-  --border-soft:  #2C2218;
-  --red:          #C05050;
-  --green:        #5A9A70;
-  --blue:         #5B9BD5;
+  --bg:           #F0EDE8;
+  --surface:      #E8E4DE;
+  --surface-2:    #DDD8D2;
+  --surface-3:    #D0C9C1;
+  --accent:       #1D4ED8;
+  --accent-dim:   rgba(29, 78, 216, 0.10);
+  --accent-glow:  rgba(29, 78, 216, 0.05);
+  --text:         #1C1917;
+  --text-muted:   #6B6460;
+  --text-faint:   #9B948C;
+  --border:       #C8C2BA;
+  --border-soft:  #DDD8D2;
+  --red:          #DC2626;
+  --green:        #16A34A;
+  --blue:         #0284C7;
   --radius-sm:    6px;
   --radius-md:    10px;
   --radius-lg:    14px;
-  --shadow-sm:    0 1px 3px rgba(0,0,0,0.4);
-  --shadow-md:    0 4px 16px rgba(0,0,0,0.5);
-  --shadow-lg:    0 8px 32px rgba(0,0,0,0.65);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.10);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.12);
+  --shadow-lg:    0 8px 32px rgba(0,0,0,0.18);
   --font:         'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --transition:   0.15s ease;
 }
@@ -236,7 +237,7 @@ strong { font-weight: 600; }
   gap: 7px;
   padding: 9px 18px;
   background: var(--accent);
-  color: #1A1814;
+  color: #FFFFFF;
   font-size: 13px;
   font-weight: 600;
   border: none;
@@ -277,12 +278,12 @@ strong { font-weight: 600; }
   color: var(--accent);
   font-size: 12px;
   font-weight: 600;
-  border: 1px solid rgba(201, 168, 76, 0.18);
+  border: 1px solid rgba(29, 78, 216, 0.18);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--transition);
 }
-.btn-card-primary:hover { background: rgba(201, 168, 76, 0.2); }
+.btn-card-primary:hover { background: rgba(29, 78, 216, 0.16); }
 
 .btn-card-icon {
   display: inline-flex;
@@ -308,16 +309,16 @@ strong { font-weight: 600; }
 
 .btn-danger-solid {
   padding: 8px 18px;
-  background: rgba(192, 80, 80, 0.12);
-  color: #E07070;
+  background: rgba(220, 38, 38, 0.08);
+  color: #DC2626;
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid rgba(192, 80, 80, 0.3);
+  border: 1px solid rgba(220, 38, 38, 0.25);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: background var(--transition);
 }
-.btn-danger-solid:hover { background: rgba(192, 80, 80, 0.22); }
+.btn-danger-solid:hover { background: rgba(220, 38, 38, 0.15); }
 
 /* ══════════════════════════════════════════
    MODAL
@@ -526,7 +527,7 @@ strong { font-weight: 600; }
 .tool-btn.active {
   color: var(--accent);
   background: var(--accent-dim);
-  border-color: rgba(201, 168, 76, 0.22);
+  border-color: rgba(29, 78, 216, 0.22);
 }
 
 .tool-sep {
@@ -613,7 +614,7 @@ strong { font-weight: 600; }
   position: absolute;
   bottom: 14px;
   left: 14px;
-  background: rgba(44, 34, 24, 0.88);
+  background: rgba(240, 237, 232, 0.92);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px 10px;
@@ -628,12 +629,12 @@ strong { font-weight: 600; }
   position: absolute;
   bottom: 14px;
   left: 120px;
-  background: rgba(44, 34, 24, 0.88);
+  background: rgba(240, 237, 232, 0.92);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 10px;
-  color: var(--text-faint);
+  color: var(--text-muted);
   pointer-events: none;
   backdrop-filter: blur(4px);
   z-index: 5;
@@ -645,12 +646,12 @@ strong { font-weight: 600; }
   top: 8px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgba(44, 34, 24, 0.92);
-  border: 1px solid var(--border);
+  background: rgba(28, 25, 23, 0.85);
+  border: 1px solid rgba(28,25,23,0.1);
   border-radius: 20px;
   padding: 5px 14px;
   font-size: 11px;
-  color: var(--text-muted);
+  color: #F5F2EE;
   pointer-events: none;
   backdrop-filter: blur(4px);
   z-index: 5;
@@ -672,7 +673,7 @@ strong { font-weight: 600; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(44, 34, 24, 0.92);
+  background: rgba(240, 237, 232, 0.94);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text);
@@ -686,7 +687,7 @@ strong { font-weight: 600; }
   transition: background var(--transition), border-color var(--transition);
 }
 .hud-nav-btn:hover { background: var(--surface-2); }
-.hud-nav-btn:active { background: var(--accent-dim); border-color: rgba(201, 168, 76, 0.4); }
+.hud-nav-btn:active { background: var(--accent-dim); border-color: rgba(29, 78, 216, 0.35); }
 
 /* ── Teclado numérico ── */
 .numpad { width: 280px; max-width: 86vw; }
@@ -738,7 +739,7 @@ strong { font-weight: 600; }
   -webkit-tap-highlight-color: transparent;
   transition: background var(--transition);
 }
-.np-key:active { background: var(--accent-dim); border-color: rgba(201, 168, 76, 0.4); }
+.np-key:active { background: var(--accent-dim); border-color: rgba(29, 78, 216, 0.35); }
 .np-back { color: var(--text-muted); font-size: 20px; }
 .numpad-actions {
   display: flex;
@@ -777,7 +778,7 @@ strong { font-weight: 600; }
 .op-seg button.active {
   color: var(--accent);
   background: var(--accent-dim);
-  border-color: rgba(201, 168, 76, 0.4);
+  border-color: rgba(29, 78, 216, 0.35);
 }
 
 .op-flip {
@@ -812,7 +813,7 @@ strong { font-weight: 600; }
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  background: rgba(44, 34, 24, 0.95);
+  background: rgba(240, 237, 232, 0.96);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
@@ -821,7 +822,7 @@ strong { font-weight: 600; }
   -webkit-tap-highlight-color: transparent;
 }
 .wall-act-done {
-  color: #1A1814;
+  color: #FFFFFF;
   background: var(--accent);
   border-color: var(--accent);
 }
@@ -883,8 +884,8 @@ strong { font-weight: 600; }
   border-color: var(--surface-3);
   background: var(--surface-2);
 }
-.install-btn.electric:hover { border-color: rgba(201, 168, 76, 0.4); color: var(--accent); }
-.install-btn.hydro:hover { border-color: rgba(91, 155, 213, 0.4); color: var(--blue); }
+.install-btn.electric:hover { border-color: rgba(217,119,6,0.4); color: #D97706; }
+.install-btn.hydro:hover { border-color: rgba(2,132,199,0.4); color: var(--blue); }
 
 /* ── Section label in modal ── */
 .modal-section {
@@ -959,7 +960,7 @@ kbd {
   flex: 1;
   position: relative;
   overflow: hidden;
-  background: #0e0c0a;
+  background: #E8E4DE;
 }
 
 #pa-canvas {
@@ -1031,7 +1032,7 @@ kbd {
   max-width: 90vw;
   background: var(--surface);
   border-left: 1px solid var(--border);
-  box-shadow: -6px 0 24px rgba(0,0,0,0.55);
+  box-shadow: -6px 0 24px rgba(0,0,0,0.12);
   display: flex;
   flex-direction: column;
   z-index: 400;                /* acima de qualquer elemento do editor */
@@ -2998,25 +2999,25 @@ const CanvasEditor = {
     const r = 16 / this.zoom;
 
     // Halo externo
-    ctx.strokeStyle = 'rgba(90,154,112,0.5)';
+    ctx.strokeStyle = 'rgba(22,163,74,0.45)';
     ctx.lineWidth   = 1.5 / this.zoom;
     ctx.beginPath(); ctx.arc(pt.x, pt.y, r * 1.7, 0, Math.PI * 2); ctx.stroke();
 
     // Anel sólido
-    ctx.strokeStyle = '#5A9A70';
+    ctx.strokeStyle = '#16A34A';
     ctx.lineWidth   = 2.5 / this.zoom;
     ctx.beginPath(); ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2); ctx.stroke();
 
     // Cruz interna
     const c = r * 0.5;
-    ctx.strokeStyle = '#5A9A70';
+    ctx.strokeStyle = '#16A34A';
     ctx.lineWidth   = 2 / this.zoom;
     ctx.beginPath();
     ctx.moveTo(pt.x - c, pt.y); ctx.lineTo(pt.x + c, pt.y);
     ctx.moveTo(pt.x, pt.y - c); ctx.lineTo(pt.x, pt.y + c);
     ctx.stroke();
 
-    // Label "Conectar" — badge preto + texto branco
+    // Label "Conectar"
     const fs  = 11 / this.zoom;
     const pad = 4  / this.zoom;
     ctx.font = `600 ${fs}px Inter,sans-serif`;
@@ -3025,11 +3026,11 @@ const CanvasEditor = {
     const tw = ctx.measureText('Conectar').width;
     const bx = pt.x - tw / 2 - pad;
     const by = pt.y - r - fs - pad * 2 - 2 / this.zoom;
-    ctx.fillStyle = 'rgba(10,30,18,0.92)'; // fundo escuro com tom verde
+    ctx.fillStyle = '#16A34A';
     ctx.beginPath();
     ctx.roundRect(bx, by, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
     ctx.fill();
-    ctx.fillStyle = '#5A9A70'; // verde igual ao círculo
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillText('Conectar', pt.x, by + fs + pad * 0.75);
     ctx.textBaseline = 'alphabetic';
   },
@@ -3112,7 +3113,7 @@ const CanvasEditor = {
     const H = this.canvas.height;
 
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#1A1814';
+    ctx.fillStyle = '#FAF8F4';
     ctx.fillRect(0, 0, W, H);
 
     ctx.save();
@@ -3187,11 +3188,11 @@ const CanvasEditor = {
       ctx.stroke();
     };
 
-    drawLines(minor, '#352B1E', 0.5);
-    drawLines(major, '#4A3D2C', 1);
+    drawLines(minor, '#EAE7E2', 0.5);
+    drawLines(major, '#D5D0C8', 1);
 
     // Origin cross
-    ctx.strokeStyle = '#4A3F32';
+    ctx.strokeStyle = '#C8C2BA';
     ctx.lineWidth = 1 / this.zoom;
     ctx.beginPath();
     ctx.moveTo(-200, 0); ctx.lineTo(200, 0);
@@ -3208,9 +3209,9 @@ const CanvasEditor = {
       ctx.moveTo(env.polygon[0].x, env.polygon[0].y);
       env.polygon.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
       ctx.closePath();
-      ctx.fillStyle = 'rgba(201,168,76,0.05)';
+      ctx.fillStyle = 'rgba(99,102,241,0.07)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(201,168,76,0.25)';
+      ctx.strokeStyle = 'rgba(99,102,241,0.30)';
       ctx.lineWidth = 2 / this.zoom;
       ctx.setLineDash([10 / this.zoom, 6 / this.zoom]);
       ctx.stroke();
@@ -3221,17 +3222,17 @@ const CanvasEditor = {
         const sel = this.selected?.id === env.id;
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font      = `500 ${fs}px Inter,sans-serif`;
-        ctx.fillStyle = sel ? 'rgba(201,168,76,0.85)' : 'rgba(201,168,76,0.55)';
+        ctx.font      = `600 ${fs}px Inter,sans-serif`;
+        ctx.fillStyle = sel ? '#1D4ED8' : '#3730A3';
         ctx.fillText(env.name || 'Ambiente', env.centroid.x, env.centroid.y);
         if (env.area != null) {
           ctx.font      = `400 ${fs * 0.68}px Inter,sans-serif`;
-          ctx.fillStyle = 'rgba(168,152,128,0.45)';
+          ctx.fillStyle = 'rgba(55,48,163,0.65)';
           ctx.fillText(`${(env.area / 1e6).toFixed(2)} m²`, env.centroid.x, env.centroid.y + fs * 1.1);
         }
         if (env.peDireito) {
           ctx.font      = `400 ${fs * 0.6}px Inter,sans-serif`;
-          ctx.fillStyle = 'rgba(91,155,213,0.45)';
+          ctx.fillStyle = 'rgba(2,132,199,0.75)';
           const row3 = env.centroid.y + fs * 1.1 + fs * 0.68 * 1.2;
           ctx.fillText(`pé: ${env.peDireito}m`, env.centroid.x, row3);
         }
@@ -3396,7 +3397,7 @@ const CanvasEditor = {
       if (polyPts.length < 2) continue;
 
       const poly = chainPoly(polyPts, t, closed);
-      ctx.fillStyle = chain.sel ? '#C9A84C' : '#F0EBE0';
+      ctx.fillStyle = chain.sel ? '#1D4ED8' : '#1C3557';
       ctx.beginPath();
       ctx.moveTo(poly[0].x, poly[0].y);
       for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
@@ -3431,12 +3432,11 @@ const CanvasEditor = {
       const tw = ctx.measureText(label).width;
       // Fundo do label
       const pad = 4 / this.zoom;
-      ctx.fillStyle = 'rgba(18,16,14,0.92)'; // mais opaco = mais contraste
+      ctx.fillStyle = 'rgba(250,248,244,0.94)'; // pill claro sobre a parede
       ctx.beginPath();
       ctx.roundRect(-tw / 2 - pad, yOff - fs - pad, tw + pad * 2, fs + pad * 1.5, 3 / this.zoom);
       ctx.fill();
-      // Branco para contraste no fundo escuro do pill
-      ctx.fillStyle = sel ? '#C9A84C' : '#FFFFFF';
+      ctx.fillStyle = sel ? '#1D4ED8' : '#1C3557';
       ctx.fillText(label, 0, yOff);
       ctx.restore();
     }
@@ -3473,7 +3473,7 @@ const CanvasEditor = {
     if (preview) ctx.globalAlpha = 0.55;
 
     // Abre o vão na parede (apaga)
-    ctx.strokeStyle = preview ? 'rgba(201,168,76,0.18)' : '#1A1814';
+    ctx.strokeStyle = preview ? 'rgba(29,78,216,0.18)' : '#FAF8F4';
     ctx.lineWidth = (w.thickness || 150) + 20;
     ctx.lineCap = 'butt';
     ctx.beginPath();
@@ -3483,7 +3483,7 @@ const CanvasEditor = {
 
     // Ombreiras (traços nas pontas do vão, atravessando a espessura)
     const t2 = (w.thickness || 150) / 2 + 30;
-    ctx.strokeStyle = '#C9A84C';
+    ctx.strokeStyle = '#78350F';
     ctx.lineWidth = 2 / this.zoom;
     ctx.lineCap = 'butt';
     for (const s of [-1, 1]) {
@@ -3506,7 +3506,7 @@ const CanvasEditor = {
       const leaf  = (o.width || 800);
 
       // Folha da porta
-      ctx.strokeStyle = '#C9A84C';
+      ctx.strokeStyle = '#92400E';
       ctx.lineWidth = 4 / this.zoom;
       ctx.lineCap = 'round';
       ctx.beginPath();
@@ -3520,7 +3520,7 @@ const CanvasEditor = {
       let diff = a1 - a0;
       while (diff >  Math.PI) diff -= Math.PI * 2;
       while (diff < -Math.PI) diff += Math.PI * 2;
-      ctx.strokeStyle = 'rgba(201,168,76,0.5)';
+      ctx.strokeStyle = 'rgba(120,53,15,0.45)';
       ctx.lineWidth = 2 / this.zoom;
       ctx.setLineDash([10 / this.zoom, 6 / this.zoom]);
       ctx.beginPath();
@@ -3531,7 +3531,7 @@ const CanvasEditor = {
     } else {
       // Janela — linha dupla (vidro) dentro do vão
       const o2 = (w.thickness || 150) / 2 - 10;
-      ctx.strokeStyle = '#7FB0E0';
+      ctx.strokeStyle = '#0369A1';
       ctx.lineWidth = 2 / this.zoom;
       for (const s of [-1, 1]) {
         ctx.beginPath();
@@ -3563,21 +3563,20 @@ const CanvasEditor = {
       ctx.textBaseline = 'bottom';
 
       const tw = ctx.measureText(line1).width;
-      const alpha = preview ? 0.75 : 0.65;
-      ctx.fillStyle = `rgba(26,24,20,${alpha})`;
+      ctx.fillStyle = 'rgba(250,248,244,0.94)';
       ctx.beginPath();
       ctx.roundRect(-tw/2 - 4/this.zoom, offY - fs - 2/this.zoom, tw + 8/this.zoom, fs + 4/this.zoom, 3/this.zoom);
       ctx.fill();
-      ctx.fillStyle = (preview || sel) ? '#C9A84C' : '#FFFFFF';
+      ctx.fillStyle = (preview || sel) ? '#1D4ED8' : '#78350F';
       ctx.fillText(line1, 0, offY);
 
       if (line2) {
         const tw2 = ctx.measureText(line2).width;
-        ctx.fillStyle = 'rgba(26,24,20,0.75)';
+        ctx.fillStyle = 'rgba(250,248,244,0.94)';
         ctx.beginPath();
         ctx.roundRect(-tw2/2 - 4/this.zoom, offY - fs*2 - 6/this.zoom, tw2 + 8/this.zoom, fs + 4/this.zoom, 3/this.zoom);
         ctx.fill();
-        ctx.fillStyle = '#7FB0E0';
+        ctx.fillStyle = '#0369A1';
         ctx.fillText(line2, 0, offY - fs - 4/this.zoom);
       }
 
@@ -3609,7 +3608,7 @@ const CanvasEditor = {
       const p1 = { x: d.x1 + px * off, y: d.y1 + py * off };
       const p2 = { x: d.x2 + px * off, y: d.y2 + py * off };
 
-      const color = sel ? '#F5F0E8' : '#C9A84C';
+      const color = sel ? '#1D4ED8' : '#0891B2';
       ctx.strokeStyle = color;
       ctx.fillStyle   = color;
       ctx.lineWidth   = 2 / this.zoom;
@@ -3622,7 +3621,7 @@ const CanvasEditor = {
         [d.x1, d.y1, p1.x, p1.y],
         [d.x2, d.y2, p2.x, p2.y],
       ]) {
-        ctx.strokeStyle = 'rgba(201,168,76,0.35)';
+        ctx.strokeStyle = 'rgba(8,145,178,0.35)';
         ctx.beginPath(); ctx.moveTo(px2, py2); ctx.lineTo(ex2, ey2); ctx.stroke();
       }
       ctx.strokeStyle = color;
@@ -3661,7 +3660,7 @@ const CanvasEditor = {
       const yOff = -(fs + 6 * u);
 
       // Fundo arredondado
-      ctx.fillStyle = 'rgba(26,24,20,0.88)';
+      ctx.fillStyle = 'rgba(250,248,244,0.94)';
       ctx.beginPath();
       ctx.roundRect(-tw / 2 - pad, yOff - fs, tw + pad * 2, fs + pad, 3 * u);
       ctx.fill();
@@ -3679,10 +3678,10 @@ const CanvasEditor = {
       const sel   = this.selected?.id === inst.id;
       // Cor vem da INSTALLATION_LIBRARY — não de checagens hardcoded de tipo
       const entry = getInstallEntry(inst.type);
-      const color = entry ? entry.color : '#C9A84C';
+      const color = entry ? entry.color : '#D97706';
 
-      ctx.strokeStyle = sel ? '#F5F0E8' : color;
-      ctx.fillStyle   = 'rgba(26,24,20,0.85)';
+      ctx.strokeStyle = sel ? '#1D4ED8' : color;
+      ctx.fillStyle   = 'rgba(250,248,244,0.92)';
       ctx.lineWidth   = 2.5 / this.zoom;
 
       ctx.beginPath();
@@ -3693,14 +3692,14 @@ const CanvasEditor = {
       const code = this._instCode(inst.type);
       const fs   = 13 / this.zoom;
       ctx.font   = `700 ${fs}px Inter,sans-serif`;
-      ctx.fillStyle   = sel ? '#F5F0E8' : color;
+      ctx.fillStyle   = sel ? '#1D4ED8' : color;
       ctx.textAlign   = 'center';
       ctx.textBaseline= 'middle';
       ctx.fillText(`${code}${inst.sequenceNumber}`, inst.x, inst.y);
 
       if (inst.height != null) {
         ctx.font = `400 ${fs * 0.8}px Inter,sans-serif`;
-        ctx.fillStyle = 'rgba(168,152,128,0.7)';
+        ctx.fillStyle = 'rgba(107,100,96,0.85)';
         ctx.fillText(`h=${inst.height}cm`, inst.x, inst.y + r + 14 / this.zoom);
       }
       ctx.textBaseline = 'alphabetic';
@@ -3714,8 +3713,8 @@ const CanvasEditor = {
       const sel = this.selected?.id === pin.id;
       const r   = 180;
 
-      ctx.fillStyle   = sel ? '#F5F0E8' : '#C9A84C';
-      ctx.strokeStyle = '#1A1814';
+      ctx.fillStyle   = sel ? '#1D4ED8' : '#DC2626';
+      ctx.strokeStyle = '#FAF8F4';
       ctx.lineWidth   = 2.5 / this.zoom;
       ctx.beginPath();
       ctx.arc(pin.x, pin.y, r, 0, Math.PI * 2);
@@ -3723,7 +3722,7 @@ const CanvasEditor = {
       ctx.stroke();
 
       ctx.font        = `700 ${13 / this.zoom}px Inter,sans-serif`;
-      ctx.fillStyle   = '#1A1814';
+      ctx.fillStyle   = '#FFFFFF';
       ctx.textAlign   = 'center';
       ctx.textBaseline= 'middle';
       ctx.fillText(`F${pin.sequenceNumber}`, pin.x, pin.y);
@@ -3744,8 +3743,8 @@ const CanvasEditor = {
       const h   = fs + pad * 2;
       const w   = tw + pad * 2;
 
-      ctx.fillStyle   = 'rgba(201,168,76,0.12)';
-      ctx.strokeStyle = sel ? '#F5F0E8' : 'rgba(201,168,76,0.5)';
+      ctx.fillStyle   = 'rgba(255,251,235,0.96)';
+      ctx.strokeStyle = sel ? '#1D4ED8' : 'rgba(245,158,11,0.55)';
       ctx.lineWidth   = 1.5 / this.zoom;
       ctx.beginPath();
       const r = 6 / this.zoom;
@@ -3753,7 +3752,7 @@ const CanvasEditor = {
       ctx.fill();
       ctx.stroke();
 
-      ctx.fillStyle   = '#F5F0E8';
+      ctx.fillStyle   = '#1C1917';
       ctx.textAlign   = 'center';
       ctx.textBaseline= 'middle';
       ctx.fillText(preview, note.x, note.y);
@@ -3793,7 +3792,7 @@ const CanvasEditor = {
       // Guia vertical (alinha em X)
       if (Math.abs(pt.x - x2) < TOL && Math.abs(pt.y - y2) > TOL * 3 && !drawnX.has(kx)) {
         drawnX.add(kx);
-        ctx.strokeStyle = 'rgba(201,168,76,0.55)';
+        ctx.strokeStyle = 'rgba(29,78,216,0.40)';
         ctx.setLineDash([60 / this.zoom, 30 / this.zoom]);
         ctx.beginPath();
         ctx.moveTo(pt.x, oy);
@@ -3801,7 +3800,7 @@ const CanvasEditor = {
         ctx.stroke();
         // Label de alinhamento
         ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(201,168,76,0.7)';
+        ctx.fillStyle = 'rgba(29,78,216,0.60)';
         ctx.font = `500 ${11 / this.zoom}px Inter,sans-serif`;
         ctx.textAlign = 'center';
         ctx.fillText('↕', pt.x, y2 - 20 / this.zoom);
@@ -3810,7 +3809,7 @@ const CanvasEditor = {
       // Guia horizontal (alinha em Y)
       if (Math.abs(pt.y - y2) < TOL && Math.abs(pt.x - x2) > TOL * 3 && !drawnY.has(ky)) {
         drawnY.add(ky);
-        ctx.strokeStyle = 'rgba(201,168,76,0.55)';
+        ctx.strokeStyle = 'rgba(29,78,216,0.40)';
         ctx.setLineDash([60 / this.zoom, 30 / this.zoom]);
         ctx.beginPath();
         ctx.moveTo(ox,     pt.y);
@@ -3818,7 +3817,7 @@ const CanvasEditor = {
         ctx.stroke();
         // Label de alinhamento
         ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(201,168,76,0.7)';
+        ctx.fillStyle = 'rgba(29,78,216,0.60)';
         ctx.font = `500 ${11 / this.zoom}px Inter,sans-serif`;
         ctx.textAlign = 'center';
         ctx.fillText('↔', x2 + 20 / this.zoom, pt.y);
@@ -3840,10 +3839,10 @@ const CanvasEditor = {
     }
 
     if (this.currentTool === 'wall') {
-      ctx.strokeStyle = 'rgba(201,168,76,0.65)';
+      ctx.strokeStyle = 'rgba(29,78,216,0.55)';
       ctx.lineWidth   = 150;
       ctx.lineCap     = 'square';
-      ctx.setLineDash([25 / this.zoom, 10 / this.zoom]); // dash ~25px, gap ~10px na tela
+      ctx.setLineDash([25 / this.zoom, 10 / this.zoom]);
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -3859,9 +3858,9 @@ const CanvasEditor = {
         ctx.textAlign = 'center';
         const lx = (x1 + x2) / 2, ly = (y1 + y2) / 2 - 16 / this.zoom;
         const tw = ctx.measureText(label).width;
-        ctx.fillStyle = '#1A1814';
+        ctx.fillStyle = 'rgba(250,248,244,0.96)';
         ctx.fillRect(lx - tw / 2 - 5 / this.zoom, ly - fs, tw + 10 / this.zoom, fs + 6 / this.zoom);
-        ctx.fillStyle = '#C9A84C';
+        ctx.fillStyle = '#1D4ED8';
         ctx.fillText(label, lx, ly);
       }
 
@@ -3874,11 +3873,11 @@ const CanvasEditor = {
         const bh = fs2 + pad * 2;
         const bx = x2 + 18 / this.zoom;
         const by = y2 - bh / 2;
-        ctx.fillStyle = '#C9A84C';
+        ctx.fillStyle = '#1D4ED8';
         ctx.beginPath();
         ctx.roundRect(bx, by, bw, bh, 4 / this.zoom);
         ctx.fill();
-        ctx.fillStyle = '#1A1814';
+        ctx.fillStyle = '#FFFFFF';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(this._snapBadge, bx + pad, by + bh / 2);
@@ -3889,42 +3888,41 @@ const CanvasEditor = {
     if (this.currentTool === 'dimension') {
       const len = dist(x1, y1, x2, y2);
       const label = fmtM(len);
-      ctx.strokeStyle = 'rgba(201,168,76,0.5)';
+      ctx.strokeStyle = 'rgba(8,145,178,0.55)';
       ctx.lineWidth   = 2 / this.zoom;
       ctx.setLineDash([150 / this.zoom, 80 / this.zoom]);
       ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
       ctx.setLineDash([]);
       ctx.font      = `600 ${15 / this.zoom}px Inter,sans-serif`;
-      ctx.fillStyle = 'rgba(201,168,76,0.85)';
+      ctx.fillStyle = '#0891B2';
       ctx.textAlign = 'center';
       ctx.fillText(label, (x1 + x2) / 2, (y1 + y2) / 2 - 12 / this.zoom);
     }
 
-    // Start dot — tamanho fixo na tela (~13px), visível mas discreto
+    // Start dot — tamanho fixo na tela (~13px)
     if (this.currentTool !== 'environment') {
       const r = 13 / this.zoom;
       const closing = this._aimClosing;
 
       if (closing) {
-        // Halo verde pulsante: mira está no ponto de fechamento — C-06
-        // (a animação de pulso é via opacidade variada em dois círculos)
-        ctx.strokeStyle = 'rgba(90,154,112,0.85)';
+        // Halo verde pulsante: mira no ponto de fechamento — C-06
+        ctx.strokeStyle = 'rgba(22,163,74,0.85)';
         ctx.lineWidth   = 2.5 / this.zoom;
         ctx.beginPath();
         ctx.arc(x1, y1, r + 14 / this.zoom, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.strokeStyle = 'rgba(90,154,112,0.4)';
+        ctx.strokeStyle = 'rgba(22,163,74,0.4)';
         ctx.beginPath();
         ctx.arc(x1, y1, r + 28 / this.zoom, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = '#5A9A70';
+        ctx.fillStyle = '#16A34A';
       } else {
-        ctx.strokeStyle = 'rgba(201,168,76,0.4)';
+        ctx.strokeStyle = 'rgba(29,78,216,0.35)';
         ctx.lineWidth   = 3 / this.zoom;
         ctx.beginPath();
         ctx.arc(x1, y1, r + 7 / this.zoom, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = '#C9A84C';
+        ctx.fillStyle = '#1D4ED8';
       }
       ctx.beginPath();
       ctx.arc(x1, y1, r, 0, Math.PI * 2);
