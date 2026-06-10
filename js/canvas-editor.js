@@ -73,6 +73,12 @@ const CanvasEditor = {
   _visibilityHandler: null,
   _hydratePromise:    null,   // Promise de hidratação das imagens do IndexedDB
 
+  // Modo bússola: planta gira com o tablet
+  _compassMode:    false,
+  _compassHeading: 0,      // graus suavizados (0 = norte)
+  _compassRaw:     null,   // leitura bruta para suavização
+  _compassHandler: null,   // referência para removeEventListener
+
   // ── Open ──────────────────────────────────
 
   open(projectId) {
@@ -172,6 +178,9 @@ const CanvasEditor = {
             <button class="tool-btn" id="btn-grid" title="Grade/Snap">
               ${this._ic('grid')} Grade
             </button>
+            <button class="tool-btn" id="btn-compass" title="Bússola — planta gira com o tablet">
+              ${this._ic('compass')} Bússola
+            </button>
             <button class="tool-btn" id="btn-bg" title="Importar imagem de fundo">
               ${this._ic('img')} Fundo
             </button>
@@ -251,6 +260,7 @@ const CanvasEditor = {
       const dataUrl = this.canvas ? this.canvas.toDataURL('image/png') : null;
       PdfReport.generate(this.project, dataUrl);
     });
+    document.getElementById('btn-compass').addEventListener('click', () => this._toggleCompass());
     document.getElementById('btn-bg').addEventListener('click', () => this._importBackground());
     document.getElementById('btn-calib').addEventListener('click', () => this._startScaleCalib());
     document.getElementById('btn-close-env').addEventListener('click', () => this._closeEnvironment());
@@ -407,6 +417,14 @@ const CanvasEditor = {
   // ── Coordinate transforms ─────────────────
 
   toWorld(px, py) {
+    // Modo bússola: desrotacionar coordenada de tela antes de converter para mundo
+    if (this._compassMode && this.canvas) {
+      const cx = this.canvas.width / 2, cy = this.canvas.height / 2;
+      const a  = this._compassHeading * Math.PI / 180;  // rotação inversa
+      const dx = px - cx, dy = py - cy;
+      px = cx + dx * Math.cos(a) - dy * Math.sin(a);
+      py = cy + dx * Math.sin(a) + dy * Math.cos(a);
+    }
     return { x: (px - this.panX) / this.zoom, y: (py - this.panY) / this.zoom };
   },
 
@@ -590,6 +608,13 @@ const CanvasEditor = {
     ctx.fillRect(0, 0, W, H);
 
     ctx.save();
+    // Modo bússola: rotacionar planta para que o norte fique sempre no topo
+    if (this._compassMode) {
+      const angle = -this._compassHeading * Math.PI / 180;
+      ctx.translate(W / 2, H / 2);
+      ctx.rotate(angle);
+      ctx.translate(-W / 2, -H / 2);
+    }
     ctx.translate(this.panX, this.panY);
     ctx.scale(this.zoom, this.zoom);
 
@@ -615,6 +640,7 @@ const CanvasEditor = {
 
     ctx.restore();
 
+    if (this._compassMode) this._drawCompassOverlay(ctx, W, H);
     this._updateHud();
   },
 
@@ -4056,6 +4082,88 @@ const CanvasEditor = {
     }
   },
 
+  // ── Modo bússola ──────────────────────────
+
+  async _toggleCompass() {
+    if (this._compassMode) {
+      if (this._compassHandler) window.removeEventListener('deviceorientation', this._compassHandler, true);
+      this._compassHandler = null;
+      this._compassMode    = false;
+      this._compassRaw     = null;
+      document.getElementById('btn-compass')?.classList.remove('active');
+      this._draw();
+      return;
+    }
+    // iOS requer permissão explícita
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const perm = await DeviceOrientationEvent.requestPermission();
+        if (perm !== 'granted') { Toast.show('Permissão da bússola negada', 'error'); return; }
+      } catch { Toast.show('Bússola não disponível neste dispositivo', 'error'); return; }
+    }
+    if (typeof DeviceOrientationEvent === 'undefined') {
+      Toast.show('Este dispositivo não tem bússola', 'error'); return;
+    }
+    this._compassMode    = true;
+    this._compassHandler = e => this._onOrientation(e);
+    window.addEventListener('deviceorientation', this._compassHandler, true);
+    document.getElementById('btn-compass')?.classList.add('active');
+    Toast.show('Bússola ativa — planta gira com o tablet', 'success', 2500);
+    this._draw();
+  },
+
+  _onOrientation(e) {
+    if (e.alpha == null) return;
+    const raw = e.alpha;
+    if (this._compassRaw == null) {
+      this._compassRaw = raw;
+    } else {
+      // Suavização exponencial com tratamento do loop 0°/360°
+      let diff = raw - this._compassRaw;
+      if (diff >  180) diff -= 360;
+      if (diff < -180) diff += 360;
+      this._compassRaw = (this._compassRaw + diff * 0.15 + 360) % 360;
+    }
+    this._compassHeading = this._compassRaw;
+    this._draw();
+  },
+
+  _drawCompassOverlay(ctx, W, H) {
+    const r  = 20, margin = 14;
+    const cx = W - r - margin, cy = r + margin;
+
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // Círculo de fundo
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(26,24,20,0.82)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(201,168,76,0.45)';
+    ctx.lineWidth   = 1.2;
+    ctx.stroke();
+
+    // Agulha N (vermelho, aponta para o norte FÍSICO — sempre fixo na tela)
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r + 4);
+    ctx.lineTo(cx - 4, cy + 4);
+    ctx.lineTo(cx + 4, cy + 4);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(210,80,80,0.9)';
+    ctx.fill();
+
+    // Letra N
+    ctx.font         = 'bold 9px Inter,sans-serif';
+    ctx.fillStyle    = 'rgba(255,255,255,0.85)';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('N', cx, cy - r + 9);
+
+    ctx.restore();
+  },
+
   // ── Cleanup ───────────────────────────────
 
   destroy() {
@@ -4063,6 +4171,7 @@ const CanvasEditor = {
     window.removeEventListener('resize', this._resizeHandler);
     window.removeEventListener('orientationchange', this._resizeHandler);
     document.removeEventListener('visibilitychange', this._visibilityHandler);
+    if (this._compassHandler) window.removeEventListener('deviceorientation', this._compassHandler, true);
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     clearInterval(this._autoInterval);
     clearTimeout(this._saveTimer);
@@ -4123,6 +4232,7 @@ const CanvasEditor = {
       'img':    `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1.5" y="2.5" width="11" height="9" rx="1.2" stroke="currentColor" stroke-width="1.3"/><circle cx="5" cy="5.5" r="1" fill="currentColor"/><path d="M1.5 9.5l3-3 2.5 2.5 1.5-1.5 3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       'ruler2': `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 5h10v4H2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5 5v2M8 5v2M11 5v4M3 5v4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>`,
       'check':  `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7l3.5 3.5L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+      'compass':`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/><path d="M7 3v1M7 10v1M3 7h1M10 7h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M7 4.5L8.5 9.5L7 8L5.5 9.5Z" fill="currentColor" opacity="0.9"/></svg>`,
     };
     return icons[name] || '';
   },
