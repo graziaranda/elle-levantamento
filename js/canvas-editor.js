@@ -360,15 +360,8 @@ const CanvasEditor = {
   },
 
   _setTool(tool) {
-    // Bússola rotaciona o canvas mas o snap trabalha em coord. do mundo —
-    // os dois juntos produzem paredes diagonais. Desativar ao entrar em desenho.
-    if (this._compassMode && tool !== 'select') {
-      if (this._compassHandler) window.removeEventListener('deviceorientation', this._compassHandler, true);
-      this._compassHandler = null;
-      this._compassMode    = false;
-      this._compassRaw     = null;
-      document.getElementById('btn-compass')?.classList.remove('active');
-    }
+    // Bússola permanece ativa durante o desenho — o snap usa ângulos relativos ao heading.
+    // Isso permite desenhar enquanto caminha pelo ambiente sem perder a orientação visual.
     this.currentTool = tool;
     this.drawStart   = null;
     this.selected    = null;
@@ -1715,7 +1708,22 @@ const CanvasEditor = {
     const norm = a => { a %= TWO; if (a > Math.PI) a -= TWO; if (a < -Math.PI) a += TWO; return a; };
     const d2r = d => d * Math.PI / 180;
 
-    // Modo ortogonal (padrão): sempre trava em 0°/90°/180°/270°
+    // Quando a bússola está ativa, os ângulos de snap são relativos ao heading atual.
+    // Parede "horizontal" na tela = direção que a arquiteta está olhando (heading).
+    // Parede "vertical" na tela = 90° do heading.
+    // Isso permite desenhar normalmente enquanto caminha pelo ambiente.
+    if (this._compassMode) {
+      const h = this._compassHeading * Math.PI / 180; // heading em radianos
+      const cardinals = [h, h + Math.PI / 2, h + Math.PI, h - Math.PI / 2];
+      let best = cardinals[0], bestDiff = Infinity;
+      for (const t of cardinals) {
+        const diff = Math.abs(norm(ang - t));
+        if (diff < bestDiff) { bestDiff = diff; best = t; }
+      }
+      return best;
+    }
+
+    // Modo ortogonal sem bússola: trava em 0°/90°/180°/270° do mundo
     if (this._orthoMode) {
       const cardinals = [0, 90, 180, -90, -180];
       let best = d2r(0), bestDiff = Infinity;
@@ -2217,7 +2225,7 @@ const CanvasEditor = {
       const { t, d } = this._projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
       if (d < bestDist && t >= 0 && t <= 1) { bestDist = d; bestWall = w; bestT = t; }
     }
-    if (bestWall && bestDist <= 700 / this.zoom) {
+    if (bestWall && bestDist <= 600) {
       this._placingOpening = {
         type: this.currentTool, wallId: bestWall.id, position: bestT,
         cx: bestWall.x1 + (bestWall.x2 - bestWall.x1) * bestT,
@@ -2363,7 +2371,7 @@ const CanvasEditor = {
   _installAim(rawWorld) {
     let bestWall = null, bestT = 0, bestDist = Infinity;
     for (const w of this.project.canvas.walls) {
-      const { t, d } = projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+      const { t, d } = this._projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
       if (d < bestDist && t >= 0 && t <= 1) { bestDist = d; bestWall = w; bestT = t; }
     }
     // Threshold FIXO em mm (não depende do zoom): dentro de 500mm = modo parede
@@ -2393,7 +2401,7 @@ const CanvasEditor = {
         const dx = Math.abs(w.x2 - w.x1), dy = Math.abs(w.y2 - w.y1);
         const len = Math.sqrt(dx*dx + dy*dy);
         if (!len) continue;
-        const { d } = projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
+        const { d } = this._projectPointOnSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 });
         const angle = Math.atan2(Math.abs(dy), Math.abs(dx)); // 0=horiz, 90=vert
         if (angle < Math.PI / 4) { // parede mais horizontal → referência Y
           if (d < distH) { distH = d; wallH = w; }
@@ -3328,11 +3336,12 @@ const CanvasEditor = {
       // Calcular distância do canto para exibição (C-04)
       const wall = this.project.canvas.walls.find(w => w.id === elem.wallId);
       const wallLen = wall ? dist(wall.x1, wall.y1, wall.x2, wall.y2) : 0;
-      const halfW   = (elem.width || 0) / 2;
-      const distFromStart = Math.max(0, Math.round((elem.position * wallLen - halfW) / 10));
-      const distFromEnd   = Math.max(0, Math.round((wallLen - elem.position * wallLen - halfW) / 10));
+      const halfW      = (elem.width || 0) / 2;
+      const faceOffset = (wall ? (wall.thickness || 150) : 150) / 2;
+      const distFromStart = Math.max(0, Math.round((elem.position * wallLen - halfW - faceOffset) / 10));
+      const distFromEnd   = Math.max(0, Math.round((wallLen - elem.position * wallLen - halfW - faceOffset) / 10));
       const showFromEnd = elem.side === 'right' || elem.side === 'left';
-      // Mostra distância do canto mais próximo
+      // Mostra distância da face acabada (subtrai faceOffset = espessura/2)
       const distCm = Math.min(distFromStart, distFromEnd);
       const isFromEnd = distFromEnd < distFromStart;
 
@@ -3395,13 +3404,14 @@ const CanvasEditor = {
           if (!w2) return;
           const wl  = dist(w2.x1, w2.y1, w2.x2, w2.y2);
           const hw  = (o.width || 0) / 2;
+          const fo  = (w2.thickness || 150) / 2; // faceOffset — usuário digita da face acabada
           const dMm = parseLocaleFloat(e.target.value) * 10;
-          // Calcular nova posição: distância do canto mais próximo
+          // Calcular nova posição: distância da face acabada → somar faceOffset para obter centro do eixo
           let pos;
           if (isFromEnd) {
-            pos = (wl - dMm - hw) / wl;
+            pos = (wl - dMm - hw - fo) / wl;
           } else {
-            pos = (dMm + hw) / wl;
+            pos = (dMm + hw + fo) / wl;
           }
           o.position = Math.max(hw / wl, Math.min(1 - hw / wl, pos));
           this._scheduleSave();
@@ -3623,7 +3633,7 @@ const CanvasEditor = {
     // Trunca o futuro ao fazer nova ação (invalida redo pendente)
     this.history = this.history.slice(0, this.historyIdx + 1);
     this.history.push(snap);
-    if (this.history.length > 21) this.history.shift(); // 20 ações + snapshot inicial
+    if (this.history.length > 51) this.history.shift(); // 50 ações + snapshot inicial
     this.historyIdx = this.history.length - 1;
     this._updateUndoRedo();
   },
@@ -4086,11 +4096,14 @@ const CanvasEditor = {
       if (!bg) { Modal.close(); return; }
       const worldDist = dist(p1.x, p1.y, p2.x, p2.y);
       if (!worldDist) { Modal.close(); return; }
-      const d_px      = worldDist / (bg.scale || 10);
+      const oldScale  = bg.scale || 10;
+      const d_px      = worldDist / oldScale;
       bg.scale        = realMm / d_px;
-      // Keep p1 anchored in world space
-      const ix1   = (p1.x - (bg.x || 0)) / (worldDist / d_px);  // rough anchor
+      // Manter p1 ancorado no espaço do mundo — ajustar X e Y
+      const ix1   = (p1.x - (bg.x || 0)) / oldScale;
+      const iy1   = (p1.y - (bg.y || 0)) / oldScale;
       bg.x        = p1.x - ix1 * bg.scale;
+      bg.y        = p1.y - iy1 * bg.scale;
       this._scheduleSave();
       this._draw();
       Modal.close();

@@ -45,9 +45,10 @@ const DxfWriter = {
   _header(L, bbox) {
     L.push(
       '0', 'SECTION', '2', 'HEADER',
-      '9', '$ACADVER',    '1', 'AC1015',
-      '9', '$INSUNITS',   '70', '4',    // mm
-      '9', '$MEASUREMENT','70', '1',    // metric
+      '9', '$ACADVER',      '1',  'AC1015',
+      '9', '$DWGCODEPAGE',  '3',  'UTF-8',  // acentos PT-BR (Cozinha, Área etc.)
+      '9', '$INSUNITS',     '70', '4',      // mm
+      '9', '$MEASUREMENT',  '70', '1',      // metric
       '9', '$EXTMIN',
         '10', bbox.minX.toFixed(1),
         '20', (-bbox.maxY).toFixed(1),  // Y invertido
