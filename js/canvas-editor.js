@@ -82,6 +82,12 @@ const CanvasEditor = {
   _compassRaw:     null,   // leitura bruta para suavização
   _compassHandler: null,   // referência para removeEventListener
 
+  // Contorno de ambiente cancelado — preserva pts para btn-close-env
+  _pendingEnvPts:  null,
+
+  // Throttle de renderização: evita múltiplos _draw() por frame
+  _drawPending: false,
+
   // ── Open ──────────────────────────────────
 
   open(projectId) {
@@ -108,6 +114,7 @@ const CanvasEditor = {
       this._initKeyboard();
       this._startAutoSave();
       this._initVisibility();
+      this._initOfflineBadge();
       this._setTool('wall');
       this._updateUndoRedo();
 
@@ -142,17 +149,18 @@ const CanvasEditor = {
             <div class="save-dot" id="save-dot"></div>
             <span id="save-label">Salvo</span>
           </div>
-          <div style="display:flex;gap:6px;margin-left:10px;">
-            <button class="btn-ghost" id="btn-undo" style="padding:6px 10px;" title="Desfazer (Ctrl+Z)">
+          <span id="offline-badge" style="display:none;font-size:10px;font-weight:600;color:var(--green);background:rgba(22,163,74,0.10);border:1px solid rgba(22,163,74,0.25);border-radius:20px;padding:3px 9px;white-space:nowrap;">● Offline</span>
+          <div style="display:flex;gap:4px;margin-left:8px;">
+            <button class="btn-ghost" id="btn-undo" style="min-height:44px;min-width:44px;padding:6px 10px;" title="Desfazer (Ctrl+Z)">
               ${this._ic('undo')}
             </button>
-            <button class="btn-ghost" id="btn-redo" style="padding:6px 10px;opacity:0.35;" title="Refazer (Ctrl+Y)" disabled>
+            <button class="btn-ghost" id="btn-redo" style="min-height:44px;min-width:44px;padding:6px 10px;opacity:0.35;" title="Refazer (Ctrl+Y)" disabled>
               ${this._ic('redo')}
             </button>
-            <button class="btn-ghost" id="btn-dxf" style="padding:6px 11px; font-size:12px;">
+            <button class="btn-ghost" id="btn-dxf" style="min-height:44px;padding:6px 11px;font-size:12px;">
               ${this._ic('download')} DXF
             </button>
-            <button class="btn-ghost" id="btn-pdf" style="padding:6px 11px; font-size:12px;">
+            <button class="btn-ghost" id="btn-pdf" style="min-height:44px;padding:6px 11px;font-size:12px;">
               ${this._ic('pdf')} PDF
             </button>
           </div>
@@ -259,11 +267,18 @@ const CanvasEditor = {
       Toast.show('DXF exportado', 'success');
     });
     document.getElementById('btn-pdf').addEventListener('click', async () => {
-      // Aguardar hidratação — sem isso, fotos saem vazias se o PDF for gerado
-      // logo após abrir o projeto (antes do IndexedDB ter carregado as imagens).
       if (this._hydratePromise) await this._hydratePromise;
       await this._saveNow();
+      // Preservar viewport atual
+      const prevZoom = this.zoom, prevPanX = this.panX, prevPanY = this.panY;
+      // Centralizar toda a planta para que o PDF saia com zoom correto
+      this._fitScreen();
+      // Aguardar o frame de renderização do rAF throttle
+      await new Promise(r => setTimeout(r, 60));
       const dataUrl = this.canvas ? this.canvas.toDataURL('image/png') : null;
+      // Restaurar viewport
+      this.zoom = prevZoom; this.panX = prevPanX; this.panY = prevPanY;
+      this._draw();
       PdfReport.generate(this.project, dataUrl);
     });
     document.getElementById('btn-ortho').addEventListener('click', () => this._toggleOrtho());
@@ -607,6 +622,18 @@ const CanvasEditor = {
   // ── Main draw ─────────────────────────────
 
   _draw() {
+    if (!this.ctx) return;
+    // Throttle: coalesce múltiplas chamadas em um único frame de animação.
+    // Evita renderizações redundantes durante arraste em tablets lentos.
+    if (this._drawPending) return;
+    this._drawPending = true;
+    requestAnimationFrame(() => {
+      this._drawPending = false;
+      this._drawNow();
+    });
+  },
+
+  _drawNow() {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const W = this.canvas.width;
@@ -1559,9 +1586,9 @@ const CanvasEditor = {
 
     if (this.currentTool === 'wall' && this._aiming) {
       this._wallAim(raw);
-      // Mostrar "Conectar" também durante o aim — quando o endpoint apontado
-      // está perto de um endpoint existente (para fechar o ambiente ou conectar)
+      const prevWS = this._wallSnapPt;
       this._wallSnapPt = this._snapToWallEndpoint(this.mouseWorld || raw);
+      if (!prevWS && this._wallSnapPt) navigator.vibrate?.(18);
       this._archSnapPt = null;
       this._draw();
       return;
@@ -1573,16 +1600,19 @@ const CanvasEditor = {
 
     // Snap magnético de cota: indicador em tempo real
     if (this.currentTool === 'dimension') {
+      const prevAS = this._archSnapPt;
       this._archSnapPt = this._snapToArchPoint(raw);
+      if (!prevAS && this._archSnapPt) navigator.vibrate?.(18);
       this._wallSnapPt = null;
       if (this._archSnapPt) this.mouseWorld = this._archSnapPt;
     // Snap magnético de parede: mostra ímã verde ao se aproximar de endpoint
-    // — funciona TANTO antes do 1º ponto QUANTO antes do 2º (aim)
     } else if (this.currentTool === 'wall') {
+      const prevWS = this._wallSnapPt;
       this._wallSnapPt = this._snapToWallEndpoint(raw);
+      if (!prevWS && this._wallSnapPt) navigator.vibrate?.(18);
       this._archSnapPt = null;
       if (this._wallSnapPt && !this.drawStart) {
-        this.mouseWorld = this._wallSnapPt; // só snapa o cursor no início
+        this.mouseWorld = this._wallSnapPt;
       }
     } else {
       this._archSnapPt = null;
@@ -3922,10 +3952,17 @@ const CanvasEditor = {
 
   _updateEnvBtn() {
     const btn = document.getElementById('btn-close-env');
-    if (btn) btn.style.display = this.envPoints.length >= 3 ? '' : 'none';
+    if (btn) btn.style.display = (this.envPoints.length >= 3 || this._pendingEnvPts) ? '' : 'none';
   },
 
   _closeEnvironment() {
+    // Se há um contorno pendente (cancelou o modal anteriormente), usa ele
+    if (this._pendingEnvPts) {
+      const pts = this._pendingEnvPts;
+      this._pendingEnvPts = null;
+      this._promptEnvironment(pts);
+      return;
+    }
     if (this.envPoints.length < 3) return;
     const pts = [...this.envPoints];
     this.envPoints = [];
@@ -3963,7 +4000,13 @@ const CanvasEditor = {
       </div>
     `);
 
-    const cancelFn = () => { Modal.close(); this._draw(); };
+    const cancelFn = () => {
+      // Preservar contorno para que btn-close-env possa reabrir o modal
+      this._pendingEnvPts = pts;
+      this._updateEnvBtn();
+      Modal.close();
+      this._draw();
+    };
     document.getElementById('mc').addEventListener('click', cancelFn);
     document.getElementById('mc-cancel').addEventListener('click', cancelFn);
     document.getElementById('mc-save').addEventListener('click', () => {
@@ -3979,6 +4022,7 @@ const CanvasEditor = {
         peDireito: pedireito,
         observation: '',
       });
+      this._pendingEnvPts = null;
       this._scheduleSave();
       this._draw();
       Modal.close();
@@ -4129,6 +4173,18 @@ const CanvasEditor = {
     this._autoInterval = setInterval(() => this._saveNow(), 30000);
   },
 
+  _initOfflineBadge() {
+    const update = () => {
+      const badge = document.getElementById('offline-badge');
+      if (badge) badge.style.display = navigator.onLine ? 'none' : '';
+    };
+    update();
+    this._offlineHandler  = () => update();
+    this._onlineHandler   = () => update();
+    window.addEventListener('offline', this._offlineHandler);
+    window.addEventListener('online',  this._onlineHandler);
+  },
+
   // Salva quando o app vai para o fundo (aba/app minimizado, troca de app).
   // Fecha a janela em que o tablet derruba o processo antes do auto-save rodar.
   _initVisibility() {
@@ -4273,6 +4329,8 @@ const CanvasEditor = {
     if (this._ro) { this._ro.disconnect(); this._ro = null; }
     clearInterval(this._autoInterval);
     clearTimeout(this._saveTimer);
+    if (this._offlineHandler) window.removeEventListener('offline', this._offlineHandler);
+    if (this._onlineHandler)  window.removeEventListener('online',  this._onlineHandler);
     this._saveNow();
   },
 
