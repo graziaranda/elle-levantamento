@@ -360,6 +360,15 @@ const CanvasEditor = {
   },
 
   _setTool(tool) {
+    // Bússola rotaciona o canvas mas o snap trabalha em coord. do mundo —
+    // os dois juntos produzem paredes diagonais. Desativar ao entrar em desenho.
+    if (this._compassMode && tool !== 'select') {
+      if (this._compassHandler) window.removeEventListener('deviceorientation', this._compassHandler, true);
+      this._compassHandler = null;
+      this._compassMode    = false;
+      this._compassRaw     = null;
+      document.getElementById('btn-compass')?.classList.remove('active');
+    }
     this.currentTool = tool;
     this.drawStart   = null;
     this.selected    = null;
