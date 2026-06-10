@@ -88,6 +88,10 @@ const CanvasEditor = {
   // Throttle de renderização: evita múltiplos _draw() por frame
   _drawPending: false,
 
+  // Drag visual de parede no modo Select
+  // { wallId, mode: 'p1'|'p2'|'body', startWorld, origX1, origY1, origX2, origY2 }
+  _wallDrag: null,
+
   // ── Open ──────────────────────────────────
 
   open(projectId) {
@@ -394,6 +398,7 @@ const CanvasEditor = {
     this._installPreview = null;
     this._archSnapPt     = null;
     this._wallSnapPt     = null;
+    this._wallDrag       = null;
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -495,14 +500,32 @@ const CanvasEditor = {
   // ── Snap magnético para endpoints de parede ──────────────────────────────
   // Usado quando o usuário está prestes a marcar o início de uma nova parede.
   // Raio grande (24px) para uso com o dedo — evita paredes duplicadas no mesmo ponto.
-  _snapToWallEndpoint(rawWorld) {
-    const R = 24 / this.zoom;
+  _snapToWallEndpoint(rawWorld, largeRadius = false) {
+    const R = (largeRadius ? 48 : 24) / this.zoom;
     let best = null, bestD = Infinity;
     for (const w of this.project.canvas.walls) {
       for (const pt of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
         const d = dist(rawWorld.x, rawWorld.y, pt.x, pt.y);
         if (d < R && d < bestD) { bestD = d; best = { x: pt.x, y: pt.y }; }
       }
+    }
+    return best;
+  },
+
+  // Snap em mm do mundo: conecta endpoint calculado a endpoint existente dentro da tolerância
+  _snapToNearestEndpoint(worldPt, toleranceMm) {
+    let best = null, bestD = Infinity;
+    for (const w of this.project.canvas.walls) {
+      for (const pt of [{ x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }]) {
+        const d = dist(worldPt.x, worldPt.y, pt.x, pt.y);
+        if (d <= toleranceMm && d < bestD) { bestD = d; best = { x: pt.x, y: pt.y }; }
+      }
+    }
+    // Também verifica o 1º ponto da cadeia atual (fechamento antecipado)
+    if (this._chainPts?.length) {
+      const first = this._chainPts[0];
+      const d = dist(worldPt.x, worldPt.y, first.x, first.y);
+      if (d <= toleranceMm && d < bestD) { bestD = d; best = { x: first.x, y: first.y }; }
     }
     return best;
   },
@@ -966,6 +989,24 @@ const CanvasEditor = {
       ctx.fillStyle = sel ? '#1D4ED8' : '#1C3557';
       ctx.fillText(label, 0, yOff);
       ctx.restore();
+    }
+
+    // ── Handles de drag nos endpoints da parede selecionada ──
+    if (this.selected?.type === 'wall' && this.currentTool === 'select') {
+      const w = walls.find(w => w.id === this.selected.id);
+      if (w) {
+        const hr = 14 / this.zoom;  // raio do handle em pixels de tela
+        for (const [px, py, mode] of [[w.x1, w.y1, 'p1'], [w.x2, w.y2, 'p2']]) {
+          const isDragging = this._wallDrag?.mode === mode;
+          ctx.beginPath();
+          ctx.arc(px, py, hr, 0, Math.PI * 2);
+          ctx.fillStyle   = isDragging ? '#1D4ED8' : '#FFFFFF';
+          ctx.strokeStyle = '#1D4ED8';
+          ctx.lineWidth   = 2.5 / this.zoom;
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
     }
   },
 
@@ -1541,9 +1582,9 @@ const CanvasEditor = {
     // Parede: clica para fixar o início (snap magnético a endpoint existente)
     if (this.currentTool === 'wall') {
       if (!this.drawStart) {
-        // Aplicar snap de endpoint se disponível — impede paredes duplicadas
-        const snapped = this._snapToWallEndpoint(raw);
-        this._wallSnapPt = null;  // limpa indicador ao confirmar
+        // Raio maior no 1º toque — facilita conectar a paredes existentes
+        const snapped = this._snapToWallEndpoint(raw, true);
+        this._wallSnapPt = null;
         this._wallSetAnchor(snapped || world);
       } else {
         this._aiming = true; this._wallAim(raw);
@@ -1839,8 +1880,35 @@ const CanvasEditor = {
       onOk:  m => this._addWallSegment(a, dirX, dirY, m * 1000, closing),
       onCancel: () => { this.mouseWorld = a; this._draw(); },
       extraActions: closing ? [] : [
-        { id: 'np-door',   label: `${this._ic('door')} Porta`,   onOk: m => this._addWallWithOpening(a, dirX, dirY, m * 1000, 'door') },
-        { id: 'np-window', label: `${this._ic('window')} Janela`, onOk: m => this._addWallWithOpening(a, dirX, dirY, m * 1000, 'window') },
+        {
+          id: 'np-door',
+          label: `${this._ic('door')} Porta`,
+          onOk: wallM => {
+            // Parede confirmada — agora pede a largura da porta separadamente
+            this._numpad({
+              title: 'Largura da porta (cm)',
+              hint:  'Medida do vão — ex: 80, 90, 100',
+              value: '90',
+              unit:  'cm',
+              onOk:  widthCm => this._addWallWithOpening(a, dirX, dirY, wallM * 1000, 'door', widthCm * 10),
+              onCancel: () => {},
+            });
+          },
+        },
+        {
+          id: 'np-window',
+          label: `${this._ic('window')} Janela`,
+          onOk: wallM => {
+            this._numpad({
+              title: 'Largura da janela (cm)',
+              hint:  'Medida do vão — ex: 60, 100, 120',
+              value: '100',
+              unit:  'cm',
+              onOk:  widthCm => this._addWallWithOpening(a, dirX, dirY, wallM * 1000, 'window', widthCm * 10),
+              onCancel: () => {},
+            });
+          },
+        },
       ],
     });
   },
@@ -1852,6 +1920,10 @@ const CanvasEditor = {
       end = { x: first.x, y: first.y };
     } else {
       end = { x: a.x + dirX * lenMm, y: a.y + dirY * lenMm };
+      // Snap automático: se o endpoint calculado está a ≤300mm de um endpoint
+      // existente, trava nele — evita paredes "voando" por diferença de digitação
+      const snapPt = this._snapToNearestEndpoint(end, 300);
+      if (snapPt) end = snapPt;
     }
 
     this._pushHistory();
@@ -1880,7 +1952,9 @@ const CanvasEditor = {
 
   // Cria segmento de parede com abertura (porta/janela) já inserida —
   // chamado quando a usuária toca [Porta] ou [Janela] no numpad da parede.
-  _addWallWithOpening(a, dirX, dirY, lenMm, type) {
+  _addWallWithOpening(a, dirX, dirY, lenMm, type, widthMm = null) {
+    // widthMm = largura real do vão (porta/janela). Se não informado, usa padrão.
+    const openingWidth = widthMm || (type === 'door' ? 900 : 1000);
     const end    = { x: a.x + dirX * lenMm, y: a.y + dirY * lenMm };
     const wallId = generateId();
     this._pushHistory();
@@ -1894,7 +1968,7 @@ const CanvasEditor = {
       type,
       wallId,
       position:  0.5,
-      width:     lenMm,
+      width:     openingWidth,
       height:    type === 'door' ? 2100 : 1200,
       sill:      type === 'door' ? 0    : 900,
       hingeSide: 'right',
@@ -3756,6 +3830,27 @@ const CanvasEditor = {
       const rect = this.canvas.getBoundingClientRect();
       const raw  = this.toWorld(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
       this.mouseWorld = this._snapWorld(raw, false);
+
+      // Select + parede selecionada: verificar se tocou num handle de endpoint
+      if (this.currentTool === 'select' && this.selected?.type === 'wall') {
+        const w = this.project.canvas.walls.find(w => w.id === this.selected.id);
+        if (w) {
+          const HR = 28 / this.zoom;  // raio de hit em pixels de tela
+          if (dist(raw.x, raw.y, w.x1, w.y1) <= HR) {
+            this._wallDrag = { wallId: w.id, mode: 'p1', startWorld: raw,
+              origX1: w.x1, origY1: w.y1, origX2: w.x2, origY2: w.y2 };
+            this._draw();
+            return;
+          }
+          if (dist(raw.x, raw.y, w.x2, w.y2) <= HR) {
+            this._wallDrag = { wallId: w.id, mode: 'p2', startWorld: raw,
+              origX1: w.x1, origY1: w.y1, origX2: w.x2, origY2: w.y2 };
+            this._draw();
+            return;
+          }
+        }
+      }
+
       // Parede: se já há ponto inicial, este dedo começa a mirar a direção
       if (this.currentTool === 'wall' && this.drawStart) {
         this._aiming = true;
@@ -3816,6 +3911,21 @@ const CanvasEditor = {
         this._wallSnapPt = null;
       }
 
+      // Drag de endpoint de parede
+      if (this._wallDrag) {
+        const d = this._wallDrag;
+        const w = this.project.canvas.walls.find(w => w.id === d.wallId);
+        if (w) {
+          const dx = raw.x - d.startWorld.x;
+          const dy = raw.y - d.startWorld.y;
+          if (d.mode === 'p1') { w.x1 = d.origX1 + dx; w.y1 = d.origY1 + dy; }
+          if (d.mode === 'p2') { w.x2 = d.origX2 + dx; w.y2 = d.origY2 + dy; }
+        }
+        this._touches = Array.from(e.touches);
+        this._draw();
+        return;
+      }
+
       // Selecionar: arrasto com 1 dedo move o mapa
       if (this.currentTool === 'select') {
         const dx = e.touches[0].clientX - this._touches[0].clientX;
@@ -3869,6 +3979,28 @@ const CanvasEditor = {
       const rect  = this.canvas.getBoundingClientRect();
       const raw   = this.toWorld(t.clientX - rect.left, t.clientY - rect.top);
       const world = this._snapWorld(raw, false);
+
+      // Finalizar drag de endpoint
+      if (this._wallDrag) {
+        const d = this._wallDrag;
+        const w = this.project.canvas.walls.find(w => w.id === d.wallId);
+        if (w) {
+          // Snap ao endpoint mais próximo ao soltar
+          const endPt = d.mode === 'p1' ? { x: w.x1, y: w.y1 } : { x: w.x2, y: w.y2 };
+          const snapPt = this._snapToNearestEndpoint(endPt, 300);
+          if (snapPt) {
+            if (d.mode === 'p1') { w.x1 = snapPt.x; w.y1 = snapPt.y; }
+            if (d.mode === 'p2') { w.x2 = snapPt.x; w.y2 = snapPt.y; }
+          }
+          this._pushHistory();
+          this._scheduleSave();
+        }
+        this._wallDrag = null;
+        this._touches = Array.from(e.touches);
+        this._touchStartPos = null;
+        this._draw();
+        return;
+      }
 
       // Parede: fluxo próprio (início por toque, direção por arraste/toque-alvo)
       if (this.currentTool === 'wall') {
