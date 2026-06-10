@@ -1765,6 +1765,10 @@ const CanvasEditor = {
       value: mDefault,
       onOk:  m => this._addWallSegment(a, dirX, dirY, m * 1000, closing),
       onCancel: () => { this.mouseWorld = a; this._draw(); },
+      extraActions: closing ? [] : [
+        { id: 'np-door',   label: `${this._ic('door')} Porta`,   onOk: m => this._addWallWithOpening(a, dirX, dirY, m * 1000, 'door') },
+        { id: 'np-window', label: `${this._ic('window')} Janela`, onOk: m => this._addWallWithOpening(a, dirX, dirY, m * 1000, 'window') },
+      ],
     });
   },
 
@@ -1801,6 +1805,39 @@ const CanvasEditor = {
     }
   },
 
+  // Cria segmento de parede com abertura (porta/janela) já inserida —
+  // chamado quando a usuária toca [Porta] ou [Janela] no numpad da parede.
+  _addWallWithOpening(a, dirX, dirY, lenMm, type) {
+    const end    = { x: a.x + dirX * lenMm, y: a.y + dirY * lenMm };
+    const wallId = generateId();
+    this._pushHistory();
+    this.project.canvas.walls.push({
+      id: wallId,
+      x1: a.x, y1: a.y, x2: end.x, y2: end.y,
+      thickness: 150,
+    });
+    this.project.canvas.openings.push({
+      id:        generateId(),
+      type,
+      wallId,
+      position:  0.5,
+      width:     lenMm,
+      height:    type === 'door' ? 2100 : 1200,
+      sill:      type === 'door' ? 0    : 900,
+      hingeSide: 'right',
+      openDir:   'in',
+      side:      'right',
+    });
+    this._chainPts.push({ x: end.x, y: end.y });
+    this.drawStart  = end;
+    this.mouseWorld = end;
+    this._aimAngle  = null;
+    this._updateWallActions();
+    this._scheduleSave();
+    this._draw();
+    Toast.show(type === 'door' ? 'Porta inserida — continue a parede' : 'Janela inserida — continue a parede', 'success', 2000);
+  },
+
   _resetWallChain() {
     this.drawStart   = null;
     this._chainPts   = null;
@@ -1818,9 +1855,14 @@ const CanvasEditor = {
   // Aceita toque nos botões E teclado físico (PC/tablet com teclado).
   // value = sugestão (ex: "3,20"). O primeiro toque/tecla substitui a sugestão.
   // unit  = unidade exibida (padrão: 'm')
-  _numpad({ title, hint, value, unit = 'm', onOk, onCancel }) {
+  // extraActions: [{id, label, onOk}] — botões extras entre Cancelar e OK
+  _numpad({ title, hint, value, unit = 'm', onOk, onCancel, extraActions = [] }) {
     let buf   = (value !== undefined && value !== null && value !== '') ? String(value) : '';
     let fresh = buf !== '';   // veio sugestão → 1ª interação começa do zero
+
+    const extraBtns = extraActions.map(a =>
+      `<button class="btn-ghost np-extra" id="${esc(a.id)}">${a.label}</button>`
+    ).join('');
 
     Modal.open(`
       <div class="numpad">
@@ -1838,7 +1880,8 @@ const CanvasEditor = {
         </div>
         <div class="numpad-actions">
           <button class="btn-ghost" id="np-cancel">Cancelar</button>
-          <button class="btn-primary" id="np-ok">OK</button>
+          ${extraBtns}
+          <button class="btn-primary" id="np-ok">OK → Parede</button>
         </div>
       </div>
     `);
@@ -1882,6 +1925,13 @@ const CanvasEditor = {
       const num = parseLocaleFloat(buf);
       if (!num || num <= 0) { Toast.show('Digite um valor válido', 'error'); return; }
       cleanup(); Modal.close(); onOk(num);
+    });
+    extraActions.forEach(a => {
+      document.getElementById(a.id)?.addEventListener('click', () => {
+        const num = parseLocaleFloat(buf);
+        if (!num || num <= 0) { Toast.show('Digite a largura primeiro', 'error'); return; }
+        cleanup(); Modal.close(); a.onOk(num);
+      });
     });
   },
 
