@@ -73,6 +73,9 @@ const CanvasEditor = {
   _visibilityHandler: null,
   _hydratePromise:    null,   // Promise de hidratação das imagens do IndexedDB
 
+  // Modo ortogonal: força paredes em 0°/90°/180°/270° (padrão ON)
+  _orthoMode: true,
+
   // Modo bússola: planta gira com o tablet
   _compassMode:    false,
   _compassHeading: 0,      // graus suavizados (0 = norte)
@@ -175,6 +178,9 @@ const CanvasEditor = {
           </div>
           <div style="flex:1;"></div>
           <div class="tool-group">
+            <button class="tool-btn active" id="btn-ortho" title="Modo ortogonal — paredes sempre em 90° (toque para liberar ângulos)">
+              ${this._ic('ortho')} Ortho
+            </button>
             <button class="tool-btn" id="btn-grid" title="Grade/Snap">
               ${this._ic('grid')} Grade
             </button>
@@ -260,6 +266,7 @@ const CanvasEditor = {
       const dataUrl = this.canvas ? this.canvas.toDataURL('image/png') : null;
       PdfReport.generate(this.project, dataUrl);
     });
+    document.getElementById('btn-ortho').addEventListener('click', () => this._toggleOrtho());
     document.getElementById('btn-compass').addEventListener('click', () => this._toggleCompass());
     document.getElementById('btn-bg').addEventListener('click', () => this._importBackground());
     document.getElementById('btn-calib').addEventListener('click', () => this._startScaleCalib());
@@ -1698,10 +1705,32 @@ const CanvasEditor = {
     const TWO = Math.PI * 2;
     const norm = a => { a %= TWO; if (a > Math.PI) a -= TWO; if (a < -Math.PI) a += TWO; return a; };
     const d2r = d => d * Math.PI / 180;
-    // 90° tem tolerância maior (mais comum); 45° tolerância menor
-    for (const t of [0, 90, 180, -90, -180]) if (Math.abs(norm(ang - d2r(t))) <= d2r(14)) return d2r(t);
-    for (const t of [45, 135, -45, -135])    if (Math.abs(norm(ang - d2r(t))) <= d2r(7))  return d2r(t);
-    return ang; // ângulo livre
+
+    // Modo ortogonal (padrão): sempre trava em 0°/90°/180°/270°
+    if (this._orthoMode) {
+      const cardinals = [0, 90, 180, -90, -180];
+      let best = d2r(0), bestDiff = Infinity;
+      for (const t of cardinals) {
+        const diff = Math.abs(norm(ang - d2r(t)));
+        if (diff < bestDiff) { bestDiff = diff; best = d2r(t); }
+      }
+      return best;
+    }
+
+    // Modo livre: tolerância generosa para H/V, menor para 45°
+    for (const t of [0, 90, 180, -90, -180]) if (Math.abs(norm(ang - d2r(t))) <= d2r(22)) return d2r(t);
+    for (const t of [45, 135, -45, -135])    if (Math.abs(norm(ang - d2r(t))) <= d2r(10)) return d2r(t);
+    return ang;
+  },
+
+  _toggleOrtho() {
+    this._orthoMode = !this._orthoMode;
+    const btn = document.getElementById('btn-ortho');
+    if (btn) btn.classList.toggle('active', this._orthoMode);
+    Toast.show(
+      this._orthoMode ? 'Ortho ON — paredes em 90°' : 'Ortho OFF — ângulo livre',
+      'info', 1800
+    );
   },
 
   // Atualiza a prévia enquanto arrasta a direção
@@ -4283,6 +4312,7 @@ const CanvasEditor = {
       'ruler2': `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 5h10v4H2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M5 5v2M8 5v2M11 5v4M3 5v4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>`,
       'check':  `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 7l3.5 3.5L11.5 4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       'compass':`<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.3"/><path d="M7 3v1M7 10v1M3 7h1M10 7h1" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><path d="M7 4.5L8.5 9.5L7 8L5.5 9.5Z" fill="currentColor" opacity="0.9"/></svg>`,
+      'ortho':  `<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 11V3h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 7h4v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/></svg>`,
     };
     return icons[name] || '';
   },
