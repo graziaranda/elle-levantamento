@@ -261,6 +261,16 @@ const CanvasEditor = {
             <button class="wall-act-btn" id="btn-wall-undo">↶ Desfazer ponto</button>
             <button class="wall-act-btn wall-act-done" id="btn-wall-done">✓ Concluir</button>
           </div>
+
+          <!-- Ações ao selecionar uma parede -->
+          <div class="wall-actions" id="sel-wall-actions" style="display:none;">
+            <button class="wall-act-btn" id="btn-sel-continue" title="Continuar desenhando a partir do final desta parede">➕ Continuar</button>
+            <button class="wall-act-btn" id="btn-sel-editlen" title="Editar comprimento da parede">✏️ Comprimento</button>
+            <button class="wall-act-btn" id="btn-sel-delete" title="Excluir parede" style="color:var(--red);">🗑 Excluir</button>
+          </div>
+
+          <!-- HUD de dimensão durante arraste -->
+          <div id="drag-dim-hud" style="display:none;position:absolute;bottom:100px;left:50%;transform:translateX(-50%);background:rgba(29,78,216,0.92);color:#fff;font-size:22px;font-weight:700;padding:8px 22px;border-radius:12px;pointer-events:none;z-index:8;font-variant-numeric:tabular-nums;"></div>
         </div>
 
       </div>
@@ -303,6 +313,29 @@ const CanvasEditor = {
     document.getElementById('btn-zoom-out').addEventListener('click', () => this._zoomAtCenter(1 / 1.25));
     document.getElementById('btn-wall-done').addEventListener('click', () => { this._resetWallChain(); this._draw(); });
     document.getElementById('btn-wall-undo').addEventListener('click', () => this._undoLastWallPoint());
+
+    // Ações da parede selecionada
+    document.getElementById('btn-sel-continue').addEventListener('click', () => {
+      if (!this.selected || this.selected.type !== 'wall') return;
+      const w = this.project.canvas.walls.find(w => w.id === this.selected.id);
+      if (!w) return;
+      this._setTool('wall');
+      const snapPt = { x: w.x2, y: w.y2 };
+      this._chainPts = [snapPt];
+      this.drawStart = snapPt;
+      this.mouseWorld = snapPt;
+      this._updateWallActions();
+      this._draw();
+    });
+    document.getElementById('btn-sel-editlen').addEventListener('click', () => {
+      if (!this.selected || this.selected.type !== 'wall') return;
+      const w = this.project.canvas.walls.find(w => w.id === this.selected.id);
+      if (w) this._editWallLength(w);
+    });
+    document.getElementById('btn-sel-delete').addEventListener('click', () => {
+      this._deleteSelected();
+      this._showSelWallActions(false);
+    });
     document.getElementById('btn-grid').addEventListener('click', () => {
       this.project.canvas.gridVisible = !this.project.canvas.gridVisible;
       this._draw();
@@ -406,6 +439,8 @@ const CanvasEditor = {
     this._wallSnapPt     = null;
     this._wallDrag       = null;
     if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
+    this._showSelWallActions(false);
+    this._updateDragDimHud();
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -2291,8 +2326,14 @@ const CanvasEditor = {
     // Check walls
     for (const w of this.project.canvas.walls) {
       if (this._pointNearSegment(rawWorld, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }, HIT)) {
+        if (this.selected?.id === w.id) {
+          // Segundo toque na mesma parede → editar comprimento
+          this._editWallLength(w);
+          return;
+        }
         this.selected = { type: 'wall', id: w.id };
         this._showProps(w, 'wall');
+        this._showSelWallActions(true);
         this._draw();
         return;
       }
@@ -2354,6 +2395,7 @@ const CanvasEditor = {
     // Deselect
     this.selected = null;
     this._showProps(null);
+    this._showSelWallActions(false);
     this._draw();
   },
 
@@ -3738,6 +3780,51 @@ const CanvasEditor = {
     this._draw();
   },
 
+  // ── Editar comprimento da parede ──────────
+
+  _editWallLength(w) {
+    const dx  = w.x2 - w.x1, dy = w.y2 - w.y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (!len) return;
+    const current = (len / 1000).toFixed(2).replace('.', ',');
+    this._numpad({
+      title: 'Comprimento da parede (m)',
+      hint:  'O endpoint final será ajustado',
+      value: current,
+      unit:  'm',
+      onOk: newM => {
+        const newLen = newM * 1000;
+        if (newLen <= 50) { Toast.show('Mínimo 5cm', 'error'); return; }
+        this._pushHistory();
+        const dirX = dx / len, dirY = dy / len;
+        w.x2 = w.x1 + dirX * newLen;
+        w.y2 = w.y1 + dirY * newLen;
+        this._scheduleSave();
+        this._draw();
+        Toast.show(`Parede ajustada para ${newM.toFixed(2)}m`, 'success', 1500);
+      },
+      onCancel: () => {},
+    });
+  },
+
+  // Mostrar/ocultar barra de ações da parede selecionada
+  _showSelWallActions(show) {
+    const el = document.getElementById('sel-wall-actions');
+    if (el) el.style.display = show ? '' : 'none';
+  },
+
+  // Atualizar HUD de dimensão durante arraste
+  _updateDragDimHud() {
+    const hud = document.getElementById('drag-dim-hud');
+    if (!hud) return;
+    if (!this._wallDrag) { hud.style.display = 'none'; return; }
+    const w = this.project.canvas.walls.find(w => w.id === this._wallDrag.wallId);
+    if (!w) { hud.style.display = 'none'; return; }
+    const len = dist(w.x1, w.y1, w.x2, w.y2);
+    hud.style.display = '';
+    hud.textContent   = (len / 1000).toFixed(2) + ' m';
+  },
+
   // ── Fit to screen ─────────────────────────
 
   _fitScreen() {
@@ -3985,11 +4072,11 @@ const CanvasEditor = {
           if (d.mode === 'p1') { w.x1 = d.origX1 + dx; w.y1 = d.origY1 + dy; }
           if (d.mode === 'p2') { w.x2 = d.origX2 + dx; w.y2 = d.origY2 + dy; }
           if (d.mode === 'body') {
-            // Mover parede inteira (translação livre)
             w.x1 = d.origX1 + dx; w.y1 = d.origY1 + dy;
             w.x2 = d.origX2 + dx; w.y2 = d.origY2 + dy;
           }
         }
+        this._updateDragDimHud();
         this._touches = Array.from(e.touches);
         this._draw();
         return;
@@ -4068,6 +4155,7 @@ const CanvasEditor = {
           this._scheduleSave();
         }
         this._wallDrag = null;
+        this._updateDragDimHud();
         this._touches = Array.from(e.touches);
         this._touchStartPos = null;
         this._draw();
