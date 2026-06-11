@@ -6281,6 +6281,70 @@ const CanvasEditor = {
     this._draw();
   },
 
+  // ── Drag de parede com paredes adjacentes ─
+
+  // Constrói o estado completo do drag incluindo quais paredes adjacentes devem seguir.
+  // Tolerância de snap: 30mm — cobre pequenas imprecisões de conexão entre paredes.
+  _buildWallDrag(w, mode, startWorld) {
+    const SNAP  = 30;
+    const walls = this.project.canvas.walls;
+
+    const collectAt = (ox, oy) => {
+      const list = [];
+      for (const other of walls) {
+        if (other.id === w.id) continue;
+        if (dist(other.x1, other.y1, ox, oy) <= SNAP) list.push({ id: other.id, ep: 'p1', ox: other.x1, oy: other.y1 });
+        if (dist(other.x2, other.y2, ox, oy) <= SNAP) list.push({ id: other.id, ep: 'p2', ox: other.x2, oy: other.y2 });
+      }
+      return list;
+    };
+
+    return {
+      wallId: w.id, mode, startWorld,
+      origX1: w.x1, origY1: w.y1,
+      origX2: w.x2, origY2: w.y2,
+      // connAtP1: paredes ligadas ao endpoint p1 — seguem quando p1 mover
+      connAtP1: (mode === 'body' || mode === 'p1') ? collectAt(w.x1, w.y1) : [],
+      // connAtP2: paredes ligadas ao endpoint p2 — seguem quando p2 mover
+      connAtP2: (mode === 'body' || mode === 'p2') ? collectAt(w.x2, w.y2) : [],
+    };
+  },
+
+  // Aplica o drag na parede e nas adjacentes (chamado no touchMove)
+  _applyWallDrag(d, raw) {
+    const walls = this.project.canvas.walls;
+    const w     = walls.find(w => w.id === d.wallId);
+    if (!w || w.locked) return;
+
+    const ddx = raw.x - d.startWorld.x;
+    const ddy = raw.y - d.startWorld.y;
+
+    let newX1 = d.origX1, newY1 = d.origY1;
+    let newX2 = d.origX2, newY2 = d.origY2;
+
+    if (d.mode === 'p1')   { newX1 += ddx; newY1 += ddy; }
+    if (d.mode === 'p2')   { newX2 += ddx; newY2 += ddy; }
+    if (d.mode === 'body') { newX1 += ddx; newY1 += ddy; newX2 += ddx; newY2 += ddy; }
+
+    w.x1 = newX1; w.y1 = newY1;
+    w.x2 = newX2; w.y2 = newY2;
+
+    // Atualizar paredes adjacentes que estavam ligadas em p1
+    for (const c of d.connAtP1) {
+      const cw = walls.find(w => w.id === c.id);
+      if (!cw) continue;
+      if (c.ep === 'p1') { cw.x1 = newX1; cw.y1 = newY1; }
+      else               { cw.x2 = newX1; cw.y2 = newY1; }
+    }
+    // Atualizar paredes adjacentes que estavam ligadas em p2
+    for (const c of d.connAtP2) {
+      const cw = walls.find(w => w.id === c.id);
+      if (!cw) continue;
+      if (c.ep === 'p1') { cw.x1 = newX2; cw.y1 = newY2; }
+      else               { cw.x2 = newX2; cw.y2 = newY2; }
+    }
+  },
+
   // ── Editar comprimento da parede ──────────
 
   _editWallLength(w) {
@@ -6457,32 +6521,26 @@ const CanvasEditor = {
       const raw  = this.toWorld(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
       this.mouseWorld = this._snapWorld(raw, false);
 
-      // Select + parede selecionada: verificar se tocou num handle de endpoint
+      // Select + parede selecionada: verificar se tocou num handle de endpoint ou corpo
       if (this.currentTool === 'select' && this.selected?.type === 'wall') {
         const w = this.project.canvas.walls.find(w => w.id === this.selected.id);
         if (w) {
-          const HR = 28 / this.zoom;  // raio de hit em pixels de tela
+          const HR    = 28 / this.zoom;
+          const bodyR = 20 / this.zoom;
+
           if (dist(raw.x, raw.y, w.x1, w.y1) <= HR) {
-            this._wallDrag = { wallId: w.id, mode: 'p1', startWorld: raw,
-              origX1: w.x1, origY1: w.y1, origX2: w.x2, origY2: w.y2 };
-            this._draw();
-            return;
+            this._wallDrag = this._buildWallDrag(w, 'p1', raw);
+            this._draw(); return;
           }
           if (dist(raw.x, raw.y, w.x2, w.y2) <= HR) {
-            this._wallDrag = { wallId: w.id, mode: 'p2', startWorld: raw,
-              origX1: w.x1, origY1: w.y1, origX2: w.x2, origY2: w.y2 };
-            this._draw();
-            return;
+            this._wallDrag = this._buildWallDrag(w, 'p2', raw);
+            this._draw(); return;
           }
-          // Long press no CORPO da parede → travar/destravar dimensão
-          const bodyR = 20 / this.zoom;
           if (this._pointNearSegment(raw, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }, bodyR)) {
             if (!w.locked) {
-              // Drag do corpo (mover parede perpendicular)
-              this._wallDrag = { wallId: w.id, mode: 'body', startWorld: raw,
-                origX1: w.x1, origY1: w.y1, origX2: w.x2, origY2: w.y2 };
+              this._wallDrag = this._buildWallDrag(w, 'body', raw);
             }
-            // Long press timer → travar/destravar
+            // Long press → travar/destravar
             this._longPressTimer = setTimeout(() => {
               this._longPressTimer = null;
               this._wallDrag = null;
@@ -6491,8 +6549,7 @@ const CanvasEditor = {
               this._draw();
               Toast.show(w.locked ? '🔒 Parede travada' : '🔓 Parede destravada', 'info', 1500);
             }, 600);
-            this._draw();
-            return;
+            this._draw(); return;
           }
         }
       }
@@ -6561,22 +6618,10 @@ const CanvasEditor = {
         this._wallSnapPt = null;
       }
 
-      // Drag de parede (endpoint ou corpo)
+      // Drag de parede — move parede + todas as adjacentes conectadas
       if (this._wallDrag) {
-        // Cancelar long press se arrastou
         if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
-        const d = this._wallDrag;
-        const w = this.project.canvas.walls.find(w => w.id === d.wallId);
-        if (w && !w.locked) {
-          const dx = raw.x - d.startWorld.x;
-          const dy = raw.y - d.startWorld.y;
-          if (d.mode === 'p1') { w.x1 = d.origX1 + dx; w.y1 = d.origY1 + dy; }
-          if (d.mode === 'p2') { w.x2 = d.origX2 + dx; w.y2 = d.origY2 + dy; }
-          if (d.mode === 'body') {
-            w.x1 = d.origX1 + dx; w.y1 = d.origY1 + dy;
-            w.x2 = d.origX2 + dx; w.y2 = d.origY2 + dy;
-          }
-        }
+        this._applyWallDrag(this._wallDrag, raw);
         this._updateDragDimHud();
         this._touches = Array.from(e.touches);
         this._draw();
