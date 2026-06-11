@@ -92,6 +92,12 @@ const CanvasEditor = {
   // { wallId, mode: 'p1'|'p2'|'body', startWorld, origX1, origY1, origX2, origY2 }
   _wallDrag: null,
 
+  // Previne criação de parede acidental após zoom com 2 dedos
+  _hadTwoFingerGesture: false,
+
+  // Long press para travar parede (timer ID)
+  _longPressTimer: null,
+
   // ── Open ──────────────────────────────────
 
   open(projectId) {
@@ -399,6 +405,7 @@ const CanvasEditor = {
     this._archSnapPt     = null;
     this._wallSnapPt     = null;
     this._wallDrag       = null;
+    if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
     this._updateCancelBtn();
     this._updateEnvBtn();
     this._updateWallActions();
@@ -991,20 +998,46 @@ const CanvasEditor = {
       ctx.restore();
     }
 
-    // ── Handles de drag nos endpoints da parede selecionada ──
-    if (this.selected?.type === 'wall' && this.currentTool === 'select') {
-      const w = walls.find(w => w.id === this.selected.id);
-      if (w) {
-        const hr = 14 / this.zoom;  // raio do handle em pixels de tela
-        for (const [px, py, mode] of [[w.x1, w.y1, 'p1'], [w.x2, w.y2, 'p2']]) {
-          const isDragging = this._wallDrag?.mode === mode;
-          ctx.beginPath();
-          ctx.arc(px, py, hr, 0, Math.PI * 2);
-          ctx.fillStyle   = isDragging ? '#1D4ED8' : '#FFFFFF';
-          ctx.strokeStyle = '#1D4ED8';
-          ctx.lineWidth   = 2.5 / this.zoom;
-          ctx.fill();
-          ctx.stroke();
+    // ── Handles de drag + cadeado nas paredes ──
+    if (this.currentTool === 'select') {
+      for (const w of walls) {
+        const sel = this.selected?.id === w.id;
+
+        // Cadeado em paredes travadas (sempre visível)
+        if (w.locked) {
+          const mx = (w.x1 + w.x2) / 2;
+          const my = (w.y1 + w.y2) / 2;
+          const fs = 13 / this.zoom;
+          ctx.font      = `${fs}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('🔒', mx, my - (w.thickness || 150) / 2 - 18 / this.zoom);
+          ctx.textBaseline = 'alphabetic';
+        }
+
+        // Handles só na parede selecionada
+        if (sel) {
+          const hr = 14 / this.zoom;
+          // Endpoints
+          for (const [px, py, mode] of [[w.x1, w.y1, 'p1'], [w.x2, w.y2, 'p2']]) {
+            const isDragging = this._wallDrag?.mode === mode;
+            ctx.beginPath(); ctx.arc(px, py, hr, 0, Math.PI * 2);
+            ctx.fillStyle   = isDragging ? '#1D4ED8' : '#FFFFFF';
+            ctx.strokeStyle = '#1D4ED8';
+            ctx.lineWidth   = 2.5 / this.zoom;
+            ctx.fill(); ctx.stroke();
+          }
+          // Handle do meio (mover parede inteira) — só se não travada
+          if (!w.locked) {
+            const mx = (w.x1 + w.x2) / 2, my = (w.y1 + w.y2) / 2;
+            const isDragging = this._wallDrag?.mode === 'body';
+            const hr2 = 11 / this.zoom;
+            ctx.beginPath(); ctx.arc(mx, my, hr2, 0, Math.PI * 2);
+            ctx.fillStyle   = isDragging ? '#1D4ED8' : 'rgba(29,78,216,0.15)';
+            ctx.strokeStyle = '#1D4ED8';
+            ctx.lineWidth   = 2 / this.zoom;
+            ctx.fill(); ctx.stroke();
+          }
         }
       }
     }
@@ -1953,8 +1986,13 @@ const CanvasEditor = {
   // Cria segmento de parede com abertura (porta/janela) já inserida —
   // chamado quando a usuária toca [Porta] ou [Janela] no numpad da parede.
   _addWallWithOpening(a, dirX, dirY, lenMm, type, widthMm = null) {
-    // widthMm = largura real do vão (porta/janela). Se não informado, usa padrão.
     const openingWidth = widthMm || (type === 'door' ? 900 : 1000);
+    // Validar: vão não pode ser maior ou igual à parede
+    if (openingWidth >= lenMm) {
+      const vaoLabel = type === 'door' ? 'porta' : 'janela';
+      Toast.show(`Vão da ${vaoLabel} (${Math.round(openingWidth/10)}cm) maior que a parede (${Math.round(lenMm/10)}cm)`, 'error', 3000);
+      return;
+    }
     const end    = { x: a.x + dirX * lenMm, y: a.y + dirY * lenMm };
     const wallId = generateId();
     this._pushHistory();
@@ -3848,6 +3886,26 @@ const CanvasEditor = {
             this._draw();
             return;
           }
+          // Long press no CORPO da parede → travar/destravar dimensão
+          const bodyR = 20 / this.zoom;
+          if (this._pointNearSegment(raw, { x: w.x1, y: w.y1 }, { x: w.x2, y: w.y2 }, bodyR)) {
+            if (!w.locked) {
+              // Drag do corpo (mover parede perpendicular)
+              this._wallDrag = { wallId: w.id, mode: 'body', startWorld: raw,
+                origX1: w.x1, origY1: w.y1, origX2: w.x2, origY2: w.y2 };
+            }
+            // Long press timer → travar/destravar
+            this._longPressTimer = setTimeout(() => {
+              this._longPressTimer = null;
+              this._wallDrag = null;
+              w.locked = !w.locked;
+              this._scheduleSave();
+              this._draw();
+              Toast.show(w.locked ? '🔒 Parede travada' : '🔓 Parede destravada', 'info', 1500);
+            }, 600);
+            this._draw();
+            return;
+          }
         }
       }
 
@@ -3864,6 +3922,10 @@ const CanvasEditor = {
     } else if (e.touches.length === 2) {
       this._aiming = false;
       this._aimingOpening = false;
+      // Se estava desenhando parede, sinalizar que houve zoom — impede commit acidental
+      if (this.currentTool === 'wall' && this.drawStart) {
+        this._hadTwoFingerGesture = true;
+      }
       this._lastTouchDist = this._touchDist(e.touches[0], e.touches[1]);
       this._lastTouchMid  = {
         x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
@@ -3911,15 +3973,22 @@ const CanvasEditor = {
         this._wallSnapPt = null;
       }
 
-      // Drag de endpoint de parede
+      // Drag de parede (endpoint ou corpo)
       if (this._wallDrag) {
+        // Cancelar long press se arrastou
+        if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
         const d = this._wallDrag;
         const w = this.project.canvas.walls.find(w => w.id === d.wallId);
-        if (w) {
+        if (w && !w.locked) {
           const dx = raw.x - d.startWorld.x;
           const dy = raw.y - d.startWorld.y;
           if (d.mode === 'p1') { w.x1 = d.origX1 + dx; w.y1 = d.origY1 + dy; }
           if (d.mode === 'p2') { w.x2 = d.origX2 + dx; w.y2 = d.origY2 + dy; }
+          if (d.mode === 'body') {
+            // Mover parede inteira (translação livre)
+            w.x1 = d.origX1 + dx; w.y1 = d.origY1 + dy;
+            w.x2 = d.origX2 + dx; w.y2 = d.origY2 + dy;
+          }
         }
         this._touches = Array.from(e.touches);
         this._draw();
@@ -3980,6 +4049,9 @@ const CanvasEditor = {
       const raw   = this.toWorld(t.clientX - rect.left, t.clientY - rect.top);
       const world = this._snapWorld(raw, false);
 
+      // Limpar long press ao levantar o dedo
+      if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; }
+
       // Finalizar drag de endpoint
       if (this._wallDrag) {
         const d = this._wallDrag;
@@ -4004,6 +4076,15 @@ const CanvasEditor = {
 
       // Parede: fluxo próprio (início por toque, direção por arraste/toque-alvo)
       if (this.currentTool === 'wall') {
+        // Se houve zoom de 2 dedos, ignorar este touch end para não criar parede acidental
+        if (this._hadTwoFingerGesture) {
+          this._hadTwoFingerGesture = false;
+          this._aiming = false;
+          this._touches       = Array.from(e.touches);
+          this._touchStartPos = null;
+          this._draw();
+          return;
+        }
         if (!this._handleScaleCalibClick(world)) {
           if (!this.drawStart) {
             this._wallSetAnchor(world);

@@ -193,6 +193,7 @@ function normalizeWall(w) {
     y2:        w.y2        || 0,
     thickness: w.thickness || 150,
     label:     w.label     ?? null,
+    locked:    w.locked    ?? false,
   };
 }
 
